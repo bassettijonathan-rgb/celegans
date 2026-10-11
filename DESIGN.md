@@ -522,7 +522,10 @@ reversal potentials (−48 to 0 mV). Gait measured on seed 1; seeds 2–6 give t
 V5 disagrees with the evidence: in real worms B cells carry forward undulation by sensing the bend
 just ahead of them (Wen et al. 2012) and A cells drive backward movement. The fit found a way to
 move the body that is not the real worm's. A second fit allowed stretch feedback only in B cells
-and SMD (`npm run fit -- --proprio DB,VB,SMD`); RESULT_B_ONLY. This is the first
+and SMD (`npm run fit -- --proprio DB,VB,SMD`), from a hand probe where each B cell is excited
+when its own side bends just ahead of it. That probe swims forward in water (1.0 Hz, wavelength
+1.2 L) but does not crawl; in 60 generations the search found nothing that crawls on agar and
+mostly nothing that moves at all, so the shipped fit is the A-cell one above. This is the first
 model-level finding of the project: with the connectome, graded neurons and stretch feedback
 alone, the gait targets are reachable but the viscosity curve is not. The head oscillator (D8),
 which this fit does not yet have, is the next candidate. Note that V1c has now been looked at, so
