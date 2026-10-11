@@ -4,7 +4,7 @@
  * steps to run per real interval.
  */
 import { STEPS_PER_SECOND } from '../sim/time';
-import { createWorld, step, type World } from '../sim/world';
+import { createWorld, setInjection, step, type World } from '../sim/world';
 import type { FromWorker, ToWorker } from './protocol';
 
 const INTERVAL_MS = 50;
@@ -20,17 +20,26 @@ function post(msg: FromWorker, transfer: Transferable[] = []): void {
 function sendTick(w: World): void {
   const x = w.body.x.slice();
   const y = w.body.y.slice();
-  post({ type: 'tick', step: w.step, x, y }, [x.buffer, y.buffer]);
+  const v = Float32Array.from(w.neurons.v);
+  const inject = Float32Array.from(w.neurons.inject);
+  post({ type: 'tick', step: w.step, x, y, v, inject }, [x.buffer, y.buffer, v.buffer, inject.buffer]);
 }
 
 onmessage = (e: MessageEvent<ToWorker>) => {
   const msg = e.data;
   if (msg.type === 'start') {
     world = createWorld(msg.seed);
-    post({ type: 'plate', radius: world.plateRadius, medium: world.medium });
+    owed = 0;
+    post({ type: 'plate', radius: world.plateRadius, medium: world.medium, rest: world.neurons.v.slice() });
     sendTick(world);
   } else if (msg.type === 'speed') {
     speed = msg.value;
+  } else if (world && msg.type === 'inject') {
+    setInjection(world, msg.neuron, msg.pA);
+    sendTick(world);
+  } else if (world && msg.type === 'clear-injections') {
+    world.neurons.inject.fill(0);
+    sendTick(world);
   }
 };
 

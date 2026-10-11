@@ -142,13 +142,32 @@ explain. A peptide layer is the first item in section 13.
 
 ### 3.5 Data pipeline (D15)
 
-A Node script in `tools/data/` reads the published tables (Cook 2019 supplementary matrices; the
-OpenWorm `ConnectomeToolbox` exports the same datasets in machine-readable form), checks counts,
-and writes `src/data/connectome.json` with source, version and checksum. The simulation never
-reads anything else. M1 checks each source's licence before committing derived data.
+`tools/data/build_connectome.py` (Python, openpyxl) downloads its inputs at pinned versions, checks
+each against a SHA-256, and writes `src/data/connectome.json` plus a cross-check report,
+`tools/data/REPORT.md`. The simulation never reads anything else. Inputs (as built in M1):
 
-Neuron positions for the brain view come from the OpenWorm 3D model / NeuroPAL atlas (Yemini et al.
-2021), projected to the side view.
+- **Cook 2019** SI 5 adjacency matrices (corrected July 2020), from OpenWorm's ConnectomeToolbox
+  (MIT). Strengths are Cook's connection sizes in **EM serial sections**, not synapse counts.
+- **Varshney 2011** synapse counts, same source, used for the cross-check and for units: over
+  the pairs both datasets list, one Varshney synapse ≈ 2.6 Cook sections (chemical) and ≈ 3.4
+  (gap junctions). The model divides Cook sizes by these, so the per-synapse conductances of 4.2
+  apply.
+- **Fenyves 2020** S3 Data (transmitter and receptor-gene tables), shipped in the `wormneuroatlas`
+  package of Randi et al. 2023. The converter re-implements Fenyves' rule from their spreadsheet
+  (sheet 5) and applies it to Cook's edges. Result: 1,360 excitatory, 440 inhibitory, 455 "complex"
+  (both signs possible) and 1,454 with no prediction (mostly cells with no classical transmitter,
+  such as the dopaminergic and serotonergic ones); by weight, 57% of neuron-to-neuron synapses
+  get a single sign. The rest are `ambiguous` and wait for fitting.
+- **Neuromuscular junctions:** body-wall muscle has excitatory nicotinic ACh and inhibitory GABA-A
+  (UNC-49) receptors (Richmond & Jorgensen 1999), so ACh and GABA synapses onto muscle are
+  `measured`; the 64 others are `ambiguous`.
+- **Soma positions** for the brain view: OpenWorm CElegansNeuroML (the VirtualWorm model, µm),
+  pinned commit. Drawing only.
+
+Checks on the result (tests in `tests/connectome.test.ts`): 302 neurons in 118 classes,
+20 pharyngeal neurons, the ventral cord classes by number, 95 body-wall muscles (24/24/23/24),
+and textbook connections (AVA–A and AVB–B motor neuron gap junctions, PLM–PVC, AVM→AVB). Cook
+and Varshney agree on most strong connections; the report lists the few strong ones that differ.
 
 ---
 
@@ -186,6 +205,22 @@ s_j  = 1 / (1 + exp(−β (V_j − V_th,j)))                       graded releas
 
 This is the model family of Wicks, Roehrig & Rankin 1996 (tap withdrawal circuit) and Kunert,
 Shlizerman & Kutz 2014 (whole-connectome dynamics), and close to OpenWorm c302's level "B".
+
+As built in M1 (`src/sim/neurons.ts`):
+
+- Default parameters are Kunert 2014's ≈ (C = 1 pF, g_L = 10 pS, E_L = −35 mV, 100 pS per gap
+  junction and per synapse, E = 0 / −48 mV, β = 0.125 /mV). They are marked as not yet checked
+  against the paper: the build environment cannot reach journal sites, so this check waits for a
+  copy of the paper.
+- `V_th` per neuron is the network's equilibrium with every synapse half open (Kunert 2014). That
+  equilibrium is also the network's resting state.
+- `ambiguous` edges get a reversal half way between E_inh and E_exc until fitted.
+- Gap junctions make the equations stiff (a well-coupled cell relaxes in ≈ 0.1 ms), so each step
+  is backward Euler in V with release taken from the start of the step, solved by
+  Jacobi-preconditioned conjugate gradients. Stable at 1 ms; a test checks 1 ms against 0.125 ms.
+- Known limit of the passive graded model: nothing caps depolarization, so a strongly stimulated
+  cell can go far above any real voltage. The voltage-gated currents that bound real cells come
+  with the conductance-based cells (4.3) and the fits.
 
 ### 4.3 Exceptions
 
@@ -438,7 +473,8 @@ What carries over from spikingbrain's design: resistive force theory, the determ
 the worker setup. Its body code does not (D9), and that repo is not changed.
 
 - **M0 Skeleton.** Repo, build, tests, lint, CI, Pages, RNG, state hash, headless runner.
-- **M1 Connectome and neurons.** Data pipeline and licences; counts checked (302 neurons,
+- **M1 Connectome and neurons** (two pull requests: wiring, graded neurons and the brain view first; the
+  conductance-based cells of 4.3 second). Data pipeline and licences; counts checked (302 neurons,
   95 muscles, totals against Cook 2019 and Varshney 2011); sign labels; graded and spiking cell
   models with step-size tests. *Visible:* brain view; inject current into any cell and watch it
   spread through the real wiring.

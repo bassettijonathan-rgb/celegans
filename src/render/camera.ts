@@ -5,7 +5,7 @@
 import type { Container } from 'pixi.js';
 
 const MIN_SCALE = 0.005;
-const MAX_SCALE = 8;
+const MAX_SCALE = 40;
 
 export class Camera {
   constructor(
@@ -20,6 +20,8 @@ export class Camera {
   }
 
   private readonly pointers = new Map<number, { x: number; y: number }>();
+  /** Only the visible view's camera reacts to the pointer. */
+  enabled = true;
 
   /** Fits a rectangle (in µm) to the element with a margin, leaving `top` pixels free for the panel. */
   fit(bounds: { x: number; y: number; width: number; height: number }, top = 0): void {
@@ -42,12 +44,14 @@ export class Camera {
   }
 
   private onWheel(e: WheelEvent): void {
+    if (!this.enabled) return;
     e.preventDefault();
     const rect = this.element.getBoundingClientRect();
     this.zoomAt(e.clientX - rect.left, e.clientY - rect.top, Math.exp(-e.deltaY * 0.0015));
   }
 
   private onPointerDown(e: PointerEvent): void {
+    if (!this.enabled) return;
     this.element.setPointerCapture(e.pointerId);
     this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
   }
