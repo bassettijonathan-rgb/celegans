@@ -35,6 +35,14 @@ export class Camera {
     );
   }
 
+  /** Pans so that the scene point (x, y) sits in the middle of the free area, keeping the zoom. */
+  centreOn(x: number, y: number, top = 0): void {
+    const w = this.element.clientWidth;
+    const h = this.element.clientHeight - top;
+    const scale = this.target.scale.x;
+    this.target.position.set(w / 2 - x * scale, top + h / 2 - y * scale);
+  }
+
   private zoomAt(px: number, py: number, factor: number): void {
     const old = this.target.scale.x;
     const scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, old * factor));

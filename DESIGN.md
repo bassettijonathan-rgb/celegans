@@ -297,6 +297,24 @@ neighbours make that matrix banded, so the solve costs about the same as the exp
 stretching springs. This is the reason not to reuse spikingbrain's symplectic Euler: an inertial
 integrator at these scales needs tiny steps and gets the physics wrong when it doesn't.
 
+As built in M2 (`src/sim/mechanics.ts`):
+
+- Each 1 ms step is backward Euler, `D (x₁ − x₀)/Δt = F(x₁)`, with the drag directions taken at
+  the start of the step, solved by **two Newton iterations** with the analytic stiffness matrix
+  (the Hessian of the stored energy; a test checks it against finite differences). The single
+  linearized step planned above was not accurate enough in water: there a body-sized bend relaxes
+  in ≈ 0.2 ms, the elastic forces are far from linear within one step, and the swimming speed came
+  out 40% too high. With two Newton iterations the 1 ms step gives the Δt → 0 speed to four digits
+  (0.1657 mm/s for the test wave), in water and on agar. A step that would move a node more than a
+  fifth of a segment is split in two.
+- Bending stiffness `k_b = 1e8 nN·µm²` (= 1e-13 N·m², inside the published range ≈ 1e-14 to
+  3e-13, Fang-Yen 2010; Backholm 2013). Stretching is a stiff spring, a numerical choice rather than
+  a measurement: segments stay within 0.1% of their length when swimming hard.
+- No internal viscous damping yet: in the overdamped model the external drag already damps every
+  mode. Added in M3 only if the gait fits need it.
+- Cost: ≈ 0.1 ms of CPU per step, so the body and the 302 neurons together run at about 1/6 of a
+  core at 1×.
+
 ### 6.3 Agar, water and in between (D10)
 
 Resistive force theory (Gray & Hancock 1955) per segment:
@@ -315,6 +333,25 @@ K   = c_n / c_t
 
 The plate has a wall (edge of the dish); worms in water need no ground.
 
+As built in M2: water `c_t = 3.3e-3`, `c_n = 5.2e-3` Pa·s (K ≈ 1.6); agar `c_t = 3.2`,
+`c_n = 128` Pa·s (K = 40), the values used by Boyle, Berri & Cohen 2012 ≈ after Niebur & Erdős
+1991. Both still marked ≈ until checked against the papers. The slider interpolates both
+coefficients in log space. The wall is a stiff spring at the dish edge. Tests:
+
+- Same drag in every direction: the worm goes nowhere (to 1e-9 µm/ms).
+- Gray & Hancock 1955: at small amplitude (β = bq = 0.03, wavelength L/3) the speed is 0.965 of
+  the infinite-filament result `U = V (K − 1) β²/2` in water and 0.896 on agar. The finite body's
+  recoil (sway and yaw) makes up the difference, more so at large K. Halving β quarters the speed
+  (ratio 3.998 and 3.954).
+- Scallop theorem: a standing wave goes < 1% as far as a travelling one, when driven slowly enough
+  for the body to follow (agar at 0.1 Hz, water at 2 Hz).
+- **A finding:** at the real crawling frequency (0.5 Hz) a standing-wave drive does move the worm,
+  about 4.5% of a forward stroke per cycle. On agar a body-sized bend takes ≈ 0.15 s to relax, and
+  different bending modes lag the drive by different amounts, so the body's actual shape is no
+  longer reciprocal. This is the "flexible oar" of Wiggins & Goldstein 1998, not an error; a test
+  keeps it.
+- Passive relaxation never gains energy, in water and on agar.
+
 ### 6.4 Muscles
 
 - 95 cells: dorsal-left, dorsal-right, ventral-right with 24 each, ventral-left with 23, staggered
@@ -326,6 +363,23 @@ The plate has a wall (edge of the dish); worms in water need no ground.
   segments ∝ `f(c)`, saturating. Muscles are joined to neighbours by gap junctions (Cook 2019).
 - Dorsal muscles bend the body dorsally, ventral ventrally. Opposing contraction is prevented only
   by the D-type cross inhibition, as in the worm.
+
+As built in M2 (`src/sim/muscles.ts`, `src/sim/puppet.ts`): the muscles are **actuators** only.
+Each has an activation from 0 to 1; the voltage and calcium of the cell come with the motor circuit
+in M3.
+
+- Placement: the 24 positions of each quadrant are spread evenly over 5–95% of the body length (a
+  simplification of WormAtlas ≈, not a measured map). Each cell pulls with a hat-shaped weight two
+  spacings long, so neighbours overlap by half, like the two staggered rows. MVL24 is missing, as in
+  the worm.
+- Active curvature at a point is `κ_max (D − V)`, where D and V are the dorsal and ventral pulls
+  (left and right each give half). `κ_max · L = 10` is a guess (crawling bends reach κ·L ≈ 5–8,
+  Stephens et al. 2008 ≈); M3 fits muscle strength.
+- Dorsal is drawn on the left of the direction of travel.
+- **Puppet** (lab bench): a prescribed head-to-tail wave of activation, dorsal and ventral in
+  antiphase. The gait follows the medium: ≈ 2 Hz and wavelength 1.5 L in water, ≈ 0.5 Hz and
+  0.65 L on agar (Fang-Yen 2010 ≈). It moves at ≈ 0.23 mm/s on agar and ≈ 0.17 mm/s in water. No
+  validation depends on these numbers; the real gait must come from the motor circuit in M3.
 
 ---
 
@@ -481,7 +535,7 @@ the worker setup. Its body code does not (D9), and that repo is not changed.
 - **M2 Body and media.** Overdamped rod, RFT, agar/water/slider, muscles as actuators. Tests:
   analytic RFT speed for a prescribed travelling wave (Gray & Hancock), passive body relaxes and
   never gains energy, a reciprocal flap goes nowhere (scallop theorem). *Visible:* a puppet worm
-  driven by a prescribed wave, crawling and swimming.
+  driven by a prescribed wave, crawling and swimming. *Done:* see the as-built notes in 6.2–6.4.
 - **M3 Locomotion.** Motor circuit wired to the body, proprioception, both rhythm mechanisms,
   first fits. V1a–c, V5. *Visible:* the worm crawls and swims on its own brain.
 - **M4 Touch and reversals.** Touch receptors, nose touch, command switch, omega turns, spontaneous

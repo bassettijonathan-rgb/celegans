@@ -4,7 +4,7 @@
  * steps to run per real interval.
  */
 import { STEPS_PER_SECOND } from '../sim/time';
-import { createWorld, setInjection, step, type World } from '../sim/world';
+import { createWorld, setInjection, setMedium, setPuppet, step, type World } from '../sim/world';
 import type { FromWorker, ToWorker } from './protocol';
 
 const INTERVAL_MS = 50;
@@ -22,7 +22,14 @@ function sendTick(w: World): void {
   const y = w.body.y.slice();
   const v = Float32Array.from(w.neurons.v);
   const inject = Float32Array.from(w.neurons.inject);
-  post({ type: 'tick', step: w.step, x, y, v, inject }, [x.buffer, y.buffer, v.buffer, inject.buffer]);
+  const muscles = Float32Array.from(w.muscles);
+  post({ type: 'tick', step: w.step, x, y, v, inject, muscles, mix: w.mix, puppet: w.puppet.on }, [
+    x.buffer,
+    y.buffer,
+    v.buffer,
+    inject.buffer,
+    muscles.buffer,
+  ]);
 }
 
 onmessage = (e: MessageEvent<ToWorker>) => {
@@ -39,6 +46,12 @@ onmessage = (e: MessageEvent<ToWorker>) => {
     sendTick(world);
   } else if (world && msg.type === 'clear-injections') {
     world.neurons.inject.fill(0);
+    sendTick(world);
+  } else if (world && msg.type === 'medium') {
+    setMedium(world, msg.mix);
+    sendTick(world);
+  } else if (world && msg.type === 'puppet') {
+    setPuppet(world, msg.on);
     sendTick(world);
   }
 };
