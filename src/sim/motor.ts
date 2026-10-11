@@ -47,9 +47,12 @@ export function stepMuscleCalcium(net: Network, v: Float64Array, activation: Flo
 
 /**
  * Stretch-sensitive neurons (DESIGN.md section 4.4). Each cell of a class in
- * the fit gets a current `gain · side · mean κL` over its receptive field:
- * from its soma position plus `offset` to that plus `extent` (fractions of
- * the body, positive towards the tail; extent 0 reads one point). Side is +1
+ * the fit gets a signed conductance `gain · side · mean κL` (nS) over its
+ * receptive field: positive opens a channel to the excitatory reversal,
+ * negative one to the inhibitory reversal, so sensing can never push a cell
+ * beyond the reversal potentials. The field runs from the soma position plus
+ * `offset` to that plus `extent` (fractions of the body, positive towards the
+ * tail; extent 0 reads one point). Side is +1
  * for dorsal cells and −1 for ventral, so a positive gain excites a cell when
  * its own side is bent concave. Wen et al. 2012 ≈ found B-type motor neurons
  * sense bending near them; Boyle, Berri & Cohen 2012 gave each B unit a field
@@ -110,7 +113,7 @@ export function buildProprioception(receptors: ProprioFit[]): ProprioMap {
 }
 
 /**
- * Sets the proprioceptive current of every sensing cell from the body's
+ * Sets the proprioceptive conductance of every sensing cell from the body's
  * turning angles (radians per node), clearing `sense` for all other cells.
  */
 export function senseProprioception(map: ProprioMap, turning: Float64Array, sense: Float64Array): void {

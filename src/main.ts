@@ -4,7 +4,7 @@
  * ?stim=AVML,PLML starts with those neurons stimulated (the first selected;
  * a class name such as VD stimulates the whole class);
  * ?view=brain opens the brain view; ?medium=0..1 sets water (0) to agar (1);
- * ?puppet=0 starts with the puppet drive off.
+ * ?puppet=1 starts with the puppet drive on (by default the fitted brain drives the body).
  */
 import { Application } from 'pixi.js';
 import { BrainView } from './render/brainView';
@@ -180,7 +180,7 @@ async function start(): Promise<void> {
   };
   send({ type: 'start', seed });
   send({ type: 'medium', mix: Number(medium.value) / 100 });
-  if (params.get('puppet') !== '0') send({ type: 'puppet', on: true });
+  if (params.get('puppet') === '1') send({ type: 'puppet', on: true });
   const stimNames = (params.get('stim') ?? '').split(',').filter(Boolean);
   for (const raw of stimNames) {
     const name = raw.trim().toUpperCase();

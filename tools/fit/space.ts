@@ -62,9 +62,9 @@ export function buildSpace(): Space {
     w('chem:small'),
     ...gapKeys.map((k) => w(`gap:${k}`)),
     w('gap:small'),
-    ...MOTOR.filter((c) => c !== 'BWM').map((c) => ({ name: `bias:${c}`, centre: 0, scale: 10, lo: -60, hi: 60 })),
+    ...MOTOR.filter((c) => c !== 'BWM').map((c) => ({ name: `bias:${c}`, centre: 0, scale: 0.3, lo: -3, hi: 3 })),
     ...PROPRIO.flatMap((c) => [
-      { name: `gain:${c}`, centre: c === 'DB' || c === 'VB' ? -200 : 0, scale: 150, lo: -3000, hi: 3000 },
+      { name: `gain:${c}`, centre: c === 'DB' || c === 'VB' ? -3 : 0, scale: 2, lo: -30, hi: 30 },
       { name: `offset:${c}`, centre: -0.15, scale: 0.1, lo: -0.5, hi: 0.5 },
       { name: `extent:${c}`, centre: 0.15, scale: 0.1, lo: 0, hi: 0.6 },
     ]),

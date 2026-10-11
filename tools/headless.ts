@@ -11,6 +11,7 @@ import { NEURON_COUNT, connectome } from '../src/sim/connectome';
 import { hashHex, hashState } from '../src/sim/hash';
 import { MEDIUM_NAMES } from '../src/sim/plate';
 import { STEPS_PER_SECOND, formatWormTime } from '../src/sim/time';
+import { appBrain } from '../src/sim/fits';
 import { createWorld, setMedium, setPuppet, step } from '../src/sim/world';
 
 function parseArgs(argv: string[]): { seed: number; seconds: number; puppet: boolean; mix: number } {
@@ -39,7 +40,7 @@ function parseArgs(argv: string[]): { seed: number; seconds: number; puppet: boo
 }
 
 const { seed, seconds, puppet, mix } = parseArgs(process.argv.slice(2));
-const world = createWorld(seed);
+const world = createWorld(seed, appBrain());
 setMedium(world, mix);
 setPuppet(world, puppet);
 const centre = () => {
@@ -52,7 +53,7 @@ const centre = () => {
   return [x / world.body.x.length, y / world.body.y.length] as const;
 };
 const [x0, y0] = centre();
-for (let i = 0; i < seconds * STEPS_PER_SECOND; i++) step(world);
+for (let i = 0; i < seconds * STEPS_PER_SECOND; i++) step(world, appBrain());
 const [x1, y1] = centre();
 const travelled = Math.hypot(x1 - x0, y1 - y0);
 

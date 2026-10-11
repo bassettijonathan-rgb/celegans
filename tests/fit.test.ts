@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { cellIndex } from '../src/sim/connectome';
-import { UNFITTED, biasCurrents, chemKey, chemScale, gapKey, type Fit } from '../src/sim/fit';
+import { UNFITTED, biasConductances, chemKey, chemScale, gapKey, type Fit } from '../src/sim/fit';
 import { GAIT_POINTS, GaitRecorder, measureGait } from '../src/sim/gait';
 import { buildNetwork, DEFAULT_PARAMS } from '../src/sim/neurons';
 import { buildBrain, createWorld, network, setMedium, setPuppet, step } from '../src/sim/world';
@@ -29,11 +29,33 @@ describe('a fit', () => {
     expect(sum(scaled)).toBeGreaterThan(sum(plain));
   });
 
-  it('gives a tonic current to every cell of a biased class', () => {
-    const b = biasCurrents({ ...UNFITTED, bias: { AVB: 12 } });
+  it('gives a tonic conductance to every cell of a biased class', () => {
+    const b = biasConductances({ ...UNFITTED, bias: { AVB: 12 } });
     expect(b[cellIndex('AVBL')]).toBe(12);
     expect(b[cellIndex('AVBR')]).toBe(12);
     expect(b[cellIndex('AVAL')]).toBe(0);
+  });
+
+  it('keeps every cell between the reversal potentials, however strong the tonic and sensory inputs', () => {
+    const fit: Fit = {
+      ...UNFITTED,
+      bias: { AVB: 500, AVA: -500, DB: 300 },
+      proprio: [
+        { cls: 'DB', gain: 3000, offset: 0, extent: 0.2 },
+        { cls: 'VB', gain: -3000, offset: 0, extent: 0.2 },
+      ],
+    };
+    const b = buildBrain(fit);
+    const w = createWorld(4, b);
+    setPuppet(w, true); // bend the body hard so the stretch inputs are large
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (let k = 0; k < 1500; k++) {
+      step(w, b);
+      for (const v of w.neurons.v) [lo, hi] = [Math.min(lo, v), Math.max(hi, v)];
+    }
+    expect(lo).toBeGreaterThanOrEqual(DEFAULT_PARAMS.eInh - 1e-6);
+    expect(hi).toBeLessThanOrEqual(DEFAULT_PARAMS.eExc + 1e-6);
   });
 
   it('runs a world deterministically with a fitted brain', () => {

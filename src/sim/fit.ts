@@ -66,8 +66,11 @@ export function gapScale(fit: Fit, a: number, b: number): number {
   return 10 ** (fit.gap[gapKey(a, b)] ?? 0);
 }
 
-/** Bias current per cell (pA) under a fit. */
-export function biasCurrents(fit: Fit): Float64Array {
+/**
+ * Tonic conductance per cell (nS) under a fit, signed: positive opens a
+ * channel to the excitatory reversal, negative to the inhibitory one.
+ */
+export function biasConductances(fit: Fit): Float64Array {
   const out = new Float64Array(connectome.cells.length);
   for (let i = 0; i < NEURON_COUNT; i++) out[i] = fit.bias[classes[i]!] ?? 0;
   return out;

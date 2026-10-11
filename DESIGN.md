@@ -246,6 +246,14 @@ and the fit decides on which side. Each class reads the mean curvature over a re
 body length behind it. DVA is left out for now: its single long process runs the length
 of the body, so it needs a receptive field rather than a point.
 
+Changed in M3b: proprioception and the fitted tonic drive are **conductances, not currents**.
+`gain · side · κL` is now a signed conductance in nS: positive opens a channel to the excitatory
+reversal (0 mV), negative one to the inhibitory reversal (−48 mV), as stretch-gated cation and
+chloride channels would. The first M3b fit, with currents, found a gait by driving motor neurons to
+±1,000 mV and beyond, which no real cell can do; with conductances every cell stays between the
+reversal potentials by construction (tested in `tests/fit.test.ts`). Currents remain only for the
+lab bench's electrode.
+
 ---
 
 ## 5. The motor system
@@ -562,7 +570,8 @@ the worker setup. Its body code does not (D9), and that repo is not changed.
 - **M3 Locomotion.** Motor circuit wired to the body, proprioception, both rhythm mechanisms,
   first fits. V1a–c, V5. *Visible:* the worm crawls and swims on its own brain. Two pull requests:
   M3a wires muscles and proprioception (done; see 4.4 and 6.4) and adds the fit machinery: a fit is
-  plain JSON of class-pair strengths, tonic currents per class and proprioceptive fields
+  plain JSON of class-pair strengths, tonic conductances per class (changed from currents in M3b,
+  see 4.4) and proprioceptive fields
   (`src/sim/fit.ts`); `npm run fit` runs separable CMA-ES over the motor circuit (127 numbers)
   scored on V1a and V1b only; gait is measured from body curvature (`src/sim/gait.ts`). M3b adds
   the rhythm mechanisms, the fits and their results.
