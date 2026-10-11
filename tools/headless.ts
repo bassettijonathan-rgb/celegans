@@ -4,6 +4,7 @@
  *   npm run sim -- --seed 42 --seconds 10
  */
 import { centrelineLength } from '../src/sim/body';
+import { NEURON_COUNT, connectome } from '../src/sim/connectome';
 import { hashHex, hashState } from '../src/sim/hash';
 import { MEDIUM_NAMES } from '../src/sim/plate';
 import { STEPS_PER_SECOND, formatWormTime } from '../src/sim/time';
@@ -34,4 +35,12 @@ console.log(`seed         ${seed}`);
 console.log(`worm time    ${formatWormTime(world.step)}`);
 console.log(`medium       ${MEDIUM_NAMES[world.medium]}`);
 console.log(`body length  ${centrelineLength(world.body).toFixed(1)} µm, nose at ${head}`);
+let lo = Infinity;
+let hi = -Infinity;
+for (const v of world.neurons.v) {
+  lo = Math.min(lo, v);
+  hi = Math.max(hi, v);
+}
+console.log(`neurons      ${NEURON_COUNT}, ${connectome.chemical.length} chemical synapses, ${connectome.gap.length} gap junction pairs`);
+console.log(`voltages     ${lo.toFixed(1)} to ${hi.toFixed(1)} mV`);
 console.log(`state hash   ${hashHex(hashState(world))}`);

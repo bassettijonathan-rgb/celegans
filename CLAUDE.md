@@ -12,10 +12,13 @@ model, and update DESIGN.md in the same pull request when a model changes.
 - `npm run typecheck`, `npm run lint`: must pass before every push
 - `npm run sim -- --seed 42 --seconds 10`: headless run in Node, prints a summary and state hash
 - `npm run build`: production build (deployed to GitHub Pages from `main`)
+- `python3 tools/data/build_connectome.py`: regenerates `src/data/connectome.json` and `tools/data/REPORT.md`
+  from the pinned published tables (needs openpyxl and network). Never edit the JSON by hand.
 
 ## Layout
 
-- `src/sim/`: the simulation (body, plate, later neurons, muscles, connectome), seeded RNG, state hash. Pure and deterministic.
+- `src/sim/`: the simulation (body, plate, connectome, neurons; later muscles), seeded RNG, state hash. Pure and deterministic.
+- `src/data/`: generated data (the connectome). `tools/data/`: the scripts that generate it.
 - `src/worker/`: runs the simulation in a Web Worker and posts snapshots.
 - `src/render/`: PixiJS drawing. Reads snapshots only; never changes simulation state.
 - `src/main.ts`, `index.html`: the page.

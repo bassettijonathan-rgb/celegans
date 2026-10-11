@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { BODY_LENGTH, MAX_RADIUS, NODES, SEGMENT_LENGTH, bodyRadius, centrelineLength } from '../src/sim/body';
 import { Medium, PLATE_RADIUS } from '../src/sim/plate';
-import { createWorld, step } from '../src/sim/world';
+import { cellIndex } from '../src/sim/connectome';
+import { createWorld, setInjection, step } from '../src/sim/world';
 import { expectDeterministic } from './helpers';
 
 describe('a new plate', () => {
@@ -49,5 +50,37 @@ describe('the body', () => {
     expect(bodyRadius(1)).toBeLessThan(0.4 * MAX_RADIUS);
     expect(bodyRadius(0)).toBeGreaterThan(0);
     expect(bodyRadius(0.25)).toBeLessThan(bodyRadius(0.4));
+  });
+});
+
+describe('the lab bench', () => {
+  it('replays the same stimulation to the same state', () => {
+    expectDeterministic((seed) => {
+      const w = createWorld(seed);
+      for (let i = 0; i < 300; i++) {
+        if (i === 100) setInjection(w, cellIndex('ALML'), 20);
+        if (i === 200) setInjection(w, cellIndex('ALML'), 0);
+        step(w);
+      }
+      return w;
+    });
+  });
+
+  it('depolarizes a stimulated neuron and lets it relax back when stopped', () => {
+    const w = createWorld(1);
+    const i = cellIndex('AVAL');
+    const rest = w.neurons.v[i]!;
+    setInjection(w, i, 20);
+    for (let k = 0; k < 500; k++) step(w);
+    expect(w.neurons.v[i]! - rest).toBeGreaterThan(1);
+    setInjection(w, i, 0);
+    for (let k = 0; k < 3000; k++) step(w);
+    expect(Math.abs(w.neurons.v[i]! - rest)).toBeLessThan(0.05);
+  });
+
+  it('rejects cells that are not neurons', () => {
+    const w = createWorld(1);
+    expect(() => setInjection(w, 302, 5)).toThrow();
+    expect(() => setInjection(w, -1, 5)).toThrow();
   });
 });
