@@ -5,6 +5,13 @@
  * Only the motor circuit is fitted here; every other class pair keeps the
  * unfitted default. Class pairs with fewer than MIN_SECTIONS EM sections in
  * total share one default number per kind (chemical, gap).
+ *
+ * Starting point: from no proprioceptive feedback the body never moves and
+ * the cost is flat, so the search starts from a hand probe that undulates
+ * (DESIGN.md section 7.3): motor neuron → muscle junctions ×100, and B
+ * cells inhibited by bending over the 15% of body just in front of them
+ * (A cells and SMD start without feedback).
+ * The fit is free to move every one of these.
  */
 import { connectome } from '../../src/sim/connectome';
 import { chemKey, fitClass, gapKey, type Fit } from '../../src/sim/fit';
@@ -48,7 +55,8 @@ export function buildSpace(): Space {
   const gapKeys = sorted(gap).filter((k) => gap.get(k)! >= MIN_SECTIONS);
   const smallChem = sorted(chem).filter((k) => chem.get(k)! < MIN_SECTIONS);
   const smallGap = sorted(gap).filter((k) => gap.get(k)! < MIN_SECTIONS);
-  const w = (name: string): Dim => ({ name, centre: 0, scale: 0.5, lo: -2, hi: 2 });
+  const START_NMJ = 2;
+  const w = (name: string): Dim => ({ name, centre: /^chem:(DB|VB|DA|VA|DD|VD|AS)>BWM$/.test(name) ? START_NMJ : 0, scale: 0.5, lo: -2, hi: 3 });
   const dims: Dim[] = [
     ...chemKeys.map((k) => w(`chem:${k}`)),
     w('chem:small'),
@@ -56,9 +64,9 @@ export function buildSpace(): Space {
     w('gap:small'),
     ...MOTOR.filter((c) => c !== 'BWM').map((c) => ({ name: `bias:${c}`, centre: 0, scale: 10, lo: -60, hi: 60 })),
     ...PROPRIO.flatMap((c) => [
-      { name: `gain:${c}`, centre: 0, scale: 20, lo: -300, hi: 300 },
-      { name: `offset:${c}`, centre: 0, scale: 0.1, lo: -0.5, hi: 0.5 },
-      { name: `extent:${c}`, centre: 0.1, scale: 0.1, lo: 0, hi: 0.6 },
+      { name: `gain:${c}`, centre: c === 'DB' || c === 'VB' ? -200 : 0, scale: 150, lo: -3000, hi: 3000 },
+      { name: `offset:${c}`, centre: -0.15, scale: 0.1, lo: -0.5, hi: 0.5 },
+      { name: `extent:${c}`, centre: 0.15, scale: 0.1, lo: 0, hi: 0.6 },
     ]),
   ];
   return { dims, chemKeys, gapKeys, smallChem, smallGap };
