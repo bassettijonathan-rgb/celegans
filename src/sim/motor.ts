@@ -9,6 +9,7 @@
 import { NODES, SEGMENT_LENGTH, BODY_LENGTH } from './body';
 import { NEURON_COUNT, connectome, type Cell } from './connectome';
 import { MUSCLE_COUNT } from './muscles';
+import type { ProprioFit } from './fit';
 import type { Network } from './neurons';
 
 /**
@@ -27,11 +28,11 @@ export function bodyFraction(cell: Cell): number {
 
 /**
  * Muscle calcium follows the cell's drive (its graded "release") with time
- * constant MUSCLE_TAU, and contraction is that calcium (0 to 1). 50 ms is a
- * guess of the right order for body-wall muscle calcium transients; it is
- * not from a measurement and M3b may fit it.
+ * constant MUSCLE_TAU, and contraction is that calcium (0 to 1). 100 ms is
+ * the muscle time constant of Boyle, Berri & Cohen 2012 (checked in their
+ * published code, `T_muscle = 0.1` s).
  */
-export const MUSCLE_TAU = 50;
+export const MUSCLE_TAU = 100;
 
 /** Advances each muscle's activation (calcium) towards its drive over dt ms. */
 export function stepMuscleCalcium(net: Network, v: Float64Array, activation: Float64Array, dt: number): void {
@@ -45,33 +46,15 @@ export function stepMuscleCalcium(net: Network, v: Float64Array, activation: Flo
 }
 
 /**
- * One class of stretch-sensitive neurons (DESIGN.md section 4.4). Each cell
- * gets a current `gain · side · κL` where κ is the body's curvature at its
- * soma position shifted by `offset` (a fraction of the body; positive is
- * towards the tail) and side is +1 for dorsal cells, −1 for ventral, so a
- * positive gain excites a cell when its own side is bent concave.
- * Wen et al. 2012 ≈ found B-type motor neurons sense bending next to them;
- * which side (anterior or posterior) and how strongly are left to the fit.
+ * Stretch-sensitive neurons (DESIGN.md section 4.4). Each cell of a class in
+ * the fit gets a current `gain · side · mean κL` over its receptive field:
+ * from its soma position plus `offset` to that plus `extent` (fractions of
+ * the body, positive towards the tail; extent 0 reads one point). Side is +1
+ * for dorsal cells and −1 for ventral, so a positive gain excites a cell when
+ * its own side is bent concave. Wen et al. 2012 ≈ found B-type motor neurons
+ * sense bending near them; Boyle, Berri & Cohen 2012 gave each B unit a field
+ * reaching half a body length behind it. Gain, offset and extent are fitted.
  */
-export interface Proprioceptor {
-  /** Anatomical class, e.g. 'VB'. */
-  cls: string;
-  /** pA per unit of κ·L (body lengths of curvature). */
-  gain: number;
-  offset: number;
-}
-
-/**
- * The classes DESIGN.md section 4.4 names. Gains are 0 (off) until fitted:
- * nothing here is measured yet.
- */
-export const DEFAULT_PROPRIOCEPTION: Proprioceptor[] = [
-  { cls: 'DB', gain: 0, offset: 0 },
-  { cls: 'VB', gain: 0, offset: 0 },
-  { cls: 'DA', gain: 0, offset: 0 },
-  { cls: 'VA', gain: 0, offset: 0 },
-  { cls: 'SMD', gain: 0, offset: 0 },
-];
 
 /** Which side a cell is on: +1 dorsal, −1 ventral, from its name (DB, SMDD… dorsal; VB, SMDV… ventral). */
 export function cellSide(cell: Cell): number {
@@ -80,37 +63,48 @@ export function cellSide(cell: Cell): number {
   return 0;
 }
 
-/** The sensing cells, resolved once: cell index, side, node index read, gain. */
+/** The sensing cells, resolved once: cell index, side, the first and last node read, gain. */
 export interface ProprioMap {
   cell: Int32Array;
   side: Float64Array;
-  node: Int32Array;
+  from: Int32Array;
+  to: Int32Array;
   gain: Float64Array;
 }
 
-export function buildProprioception(receptors: Proprioceptor[]): ProprioMap {
+/** Interior node nearest to body fraction u (turning angles live on interior nodes only). */
+function nodeAt(u: number): number {
+  return Math.min(NODES - 2, Math.max(1, Math.round(Math.min(1, Math.max(0, u)) * (NODES - 1))));
+}
+
+export function buildProprioception(receptors: ProprioFit[]): ProprioMap {
   const cell: number[] = [];
   const side: number[] = [];
-  const node: number[] = [];
+  const from: number[] = [];
+  const to: number[] = [];
   const gain: number[] = [];
   for (const r of receptors) {
+    if (r.gain === 0) continue;
     for (let i = 0; i < NEURON_COUNT; i++) {
       const c = connectome.cells[i]!;
       if (c.class !== r.cls) continue;
       const sd = cellSide(c);
       if (sd === 0) throw new Error(`${c.name}: no dorsal or ventral side`);
-      const u = Math.min(1, Math.max(0, bodyFraction(c) + r.offset));
-      // Turning angles live on interior nodes only.
-      node.push(Math.min(NODES - 2, Math.max(1, Math.round(u * (NODES - 1)))));
+      const u = bodyFraction(c) + r.offset;
+      const a = nodeAt(u);
+      const b = nodeAt(u + Math.max(0, r.extent));
       cell.push(i);
       side.push(sd);
+      from.push(Math.min(a, b));
+      to.push(Math.max(a, b));
       gain.push(r.gain);
     }
   }
   return {
     cell: Int32Array.from(cell),
     side: Float64Array.from(side),
-    node: Int32Array.from(node),
+    from: Int32Array.from(from),
+    to: Int32Array.from(to),
     gain: Float64Array.from(gain),
   };
 }
@@ -122,7 +116,9 @@ export function buildProprioception(receptors: Proprioceptor[]): ProprioMap {
 export function senseProprioception(map: ProprioMap, turning: Float64Array, sense: Float64Array): void {
   sense.fill(0);
   for (let k = 0; k < map.cell.length; k++) {
-    const kappaL = (turning[map.node[k]!]! / SEGMENT_LENGTH) * BODY_LENGTH;
+    let sum = 0;
+    for (let j = map.from[k]!; j <= map.to[k]!; j++) sum += turning[j]!;
+    const kappaL = (sum / (map.to[k]! - map.from[k]! + 1) / SEGMENT_LENGTH) * BODY_LENGTH;
     sense[map.cell[k]!] = sense[map.cell[k]!]! + map.gain[k]! * map.side[k]! * kappaL;
   }
 }

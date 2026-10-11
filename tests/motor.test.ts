@@ -107,8 +107,8 @@ describe('proprioception', () => {
 
   it('excites a cell when its own side is bent concave, at the place it reads', () => {
     const map = buildProprioception([
-      { cls: 'DB', gain: 10, offset: 0 },
-      { cls: 'VB', gain: 10, offset: 0 },
+      { cls: 'DB', gain: 10, offset: 0, extent: 0 },
+      { cls: 'VB', gain: 10, offset: 0, extent: 0 },
     ]);
     expect(map.cell.length).toBe(ofClass('DB').length + ofClass('VB').length);
     // A uniform dorsal bend of κ·L = 2.
@@ -122,7 +122,7 @@ describe('proprioception', () => {
   });
 
   it('reads the body at an offset when asked', () => {
-    const at = (offset: number) => buildProprioception([{ cls: 'DB', gain: 1, offset }]).node[0]!;
+    const at = (offset: number) => buildProprioception([{ cls: 'DB', gain: 1, offset, extent: 0 }]).from[0]!;
     expect(at(0.1)).toBeGreaterThan(at(0));
     expect(at(-0.1)).toBeLessThan(at(0));
   });

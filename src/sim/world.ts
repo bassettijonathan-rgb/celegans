@@ -10,9 +10,10 @@
 import { MAX_RADIUS, NODES, restingBody, type Body } from './body';
 import { NEURON_COUNT } from './connectome';
 import { DEFAULT_ROD, RodWorkspace, dragFor, stepRod, turningAngles } from './mechanics';
-import { DEFAULT_PROPRIOCEPTION, buildProprioception, senseProprioception, stepMuscleCalcium, type ProprioMap } from './motor';
+import { UNFITTED, type Fit } from './fit';
+import { buildProprioception, senseProprioception, stepMuscleCalcium, type ProprioMap } from './motor';
 import { MUSCLE_COUNT, activeTurning } from './muscles';
-import { buildNetwork, createNeuronState, stepNeurons, type Network, type NeuronState } from './neurons';
+import { DEFAULT_PARAMS, buildNetwork, createNeuronState, stepNeurons, type Network, type NeuronState } from './neurons';
 import { Medium, PLATE_RADIUS } from './plate';
 import { createPuppet, drivePuppet, puppetGait, type Puppet } from './puppet';
 import { Purpose, Rng } from './rng';
@@ -37,20 +38,33 @@ export interface World {
   puppet: Puppet;
 }
 
-/** The network for the default parameters; derived from data, so built once and shared. */
-let defaultNetwork: Network | undefined;
+/**
+ * Everything derived from a fit: the network and the proprioceptive map.
+ * Derived data, rebuilt on load; the world stores only which fit it uses.
+ */
+export interface Brain {
+  fit: Fit;
+  net: Network;
+  proprio: ProprioMap;
+}
+
+export function buildBrain(fit: Fit): Brain {
+  return { fit, net: buildNetwork(DEFAULT_PARAMS, fit), proprio: buildProprioception(fit.proprio) };
+}
+
+/** The brain the app uses; built once and shared. */
+let defaultBrain: Brain | undefined;
+export function brain(): Brain {
+  defaultBrain ??= buildBrain(UNFITTED);
+  return defaultBrain;
+}
+
+/** The default brain's network. */
 export function network(): Network {
-  defaultNetwork ??= buildNetwork();
-  return defaultNetwork;
+  return brain().net;
 }
 
-let defaultProprioception: ProprioMap | undefined;
-export function proprioception(): ProprioMap {
-  defaultProprioception ??= buildProprioception(DEFAULT_PROPRIOCEPTION);
-  return defaultProprioception;
-}
-
-export function createWorld(seed: number): World {
+export function createWorld(seed: number, b: Brain = brain()): World {
   const rng = new Rng(seed, Purpose.body);
   // Drop the worm somewhere in the middle third of the plate.
   const r = rng.range(0, PLATE_RADIUS / 3);
@@ -63,7 +77,7 @@ export function createWorld(seed: number): World {
     mix: 1,
     plateRadius: PLATE_RADIUS,
     body: restingBody(rng, r * Math.cos(a), r * Math.sin(a)),
-    neurons: createNeuronState(network()),
+    neurons: createNeuronState(b.net),
     muscles: new Float64Array(MUSCLE_COUNT).fill(0.5),
     puppet: createPuppet(1),
   };
@@ -75,10 +89,10 @@ const theta0 = new Float64Array(NODES);
 const turning = new Float64Array(NODES);
 
 /** Advances the world by one step (1 ms of worm time). */
-export function step(world: World): void {
-  const net = network();
+export function step(world: World, b: Brain = brain()): void {
+  const net = b.net;
   turningAngles(world.body.x, world.body.y, turning);
-  senseProprioception(proprioception(), turning, world.neurons.sense!);
+  senseProprioception(b.proprio, turning, world.neurons.sense!);
   if (net.params.noise > 0) {
     const rng = Rng.fromState(world.rng);
     stepNeurons(net, world.neurons, 1, rng);
