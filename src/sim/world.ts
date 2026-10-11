@@ -41,6 +41,12 @@ export interface World {
   touch: Touch | null;
   /** Cells killed by laser ablation, sorted; the brain must be built with the same list. */
   ablated: number[];
+  /**
+   * Optogenetics (DESIGN.md section 10): light-gated channel conductance per
+   * neuron, nS, signed like `bias`: positive a channelrhodopsin (cation,
+   * excitatory), negative a chloride pump or channel (inhibitory).
+   */
+  light: Float64Array;
 }
 
 /**
@@ -104,6 +110,7 @@ export function createWorld(seed: number, b: Brain = brain()): World {
     puppet: createPuppet(1),
     touch: null,
     ablated: [...b.ablated],
+    light: new Float64Array(NEURON_COUNT),
   };
 }
 
@@ -121,6 +128,7 @@ export function step(world: World, b: Brain = brain()): void {
   turningAngles(world.body.x, world.body.y, turning);
   senseProprioception(b.proprio, turning, world.neurons.sense!);
   senseTouch(world.touch, world.step, world.neurons.sense!);
+  for (let i = 0; i < NEURON_COUNT; i++) world.neurons.sense![i] = world.neurons.sense![i]! + world.light[i]!;
   for (const c of world.ablated) world.neurons.sense![c] = 0;
   if (world.touch && world.step >= world.touch.until) world.touch = null;
   if (net.params.noise > 0) {
@@ -180,4 +188,11 @@ export function setAblated(world: World, cells: readonly number[]): number[] {
   for (const c of cells) if (!Number.isInteger(c) || c < 0 || c >= NEURON_COUNT) throw new Error(`No neuron ${c}`);
   world.ablated = [...new Set(cells)].sort((a, b) => a - b);
   return world.ablated;
+}
+
+/** Lab bench: shine light on a neuron carrying a light-gated channel of `nS` (signed; 0 switches it off). */
+export function setLight(world: World, neuron: number, nS: number): void {
+  if (!Number.isInteger(neuron) || neuron < 0 || neuron >= NEURON_COUNT) throw new Error(`No neuron ${neuron}`);
+  if (!Number.isFinite(nS)) throw new Error(`Bad conductance ${nS}`);
+  world.light[neuron] = nS;
 }

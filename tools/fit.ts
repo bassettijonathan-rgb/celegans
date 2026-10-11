@@ -7,6 +7,7 @@
  *     [--from fit.json --sigma 0.3 --name gait-3b]   continue from a saved fit
  *     [--proprio DB,VB,SMD]   which classes get fitted stretch feedback (default all in space.ts)
  *     [--task touch]   also fit the touch responses (V2a, V2b, V4a) over the touch circuit
+ *     [--task steer]   also fit backing up while AVA is lit (optogenetics)
  *
  * Deterministic for a given seed and worker count does not matter: each
  * candidate is scored independently.
@@ -16,7 +17,7 @@ import { mkdirSync, readFileSync, writeFileSync, appendFileSync } from 'node:fs'
 import { Purpose, Rng } from '../src/sim/rng';
 import { buildSpace, fromFit, toFit, type Task } from './fit/space';
 import type { Fit } from '../src/sim/fit';
-import type { Score, TouchScore } from './fit/evaluate';
+import type { Score, SteerScore, TouchScore } from './fit/evaluate';
 
 const args = process.argv.slice(2);
 const opt = (name: string, dflt: number) => {
@@ -32,7 +33,7 @@ mkdirSync(out, { recursive: true });
 
 const proprioIdx = args.indexOf('--proprio');
 const taskIdx = args.indexOf('--task');
-const task: Task = taskIdx >= 0 && args[taskIdx + 1] === 'touch' ? 'touch' : 'gait';
+const task: Task = taskIdx >= 0 && (args[taskIdx + 1] === 'touch' || args[taskIdx + 1] === 'steer') ? (args[taskIdx + 1] as Task) : 'gait';
 const space = buildSpace(proprioIdx >= 0 ? args[proprioIdx + 1]!.split(',') : undefined, task);
 const n = space.dims.length;
 const rng = new Rng(seed, Purpose.sim);
@@ -93,6 +94,9 @@ const fmt = (g: Score['agar']) =>
 const fmtTouch = (t: TouchScore) =>
   `front min ${t.anterior.minSpeed.toFixed(3)} AVA ${(t.anterior.avaAfter - t.anterior.avaBefore).toFixed(1)} AVB ${(t.anterior.avbAfter - t.anterior.avbBefore).toFixed(1)} end ${t.anterior.recovered.toFixed(3)}; back ${t.posterior.before.toFixed(3)}→${t.posterior.after.toFixed(3)}`;
 
+const fmtSteer = (t: SteerScore) =>
+  `AVA lit: min ${t.ava.minSpeed.toFixed(3)} ΔAVA ${(t.ava.avaAfter - t.ava.avaBefore).toFixed(1)} ΔAVB ${(t.ava.avbAfter - t.ava.avbBefore).toFixed(1)} after ${t.ava.recovered.toFixed(3)}`;
+
 for (let gen = 0; gen < generations; gen++) {
   const zs: Float64Array[] = [];
   const xs: Float64Array[] = [];
@@ -111,7 +115,9 @@ for (let gen = 0; gen < generations; gen++) {
       fittedTo:
         task === 'touch'
           ? 'V1a, V1b gait + V2a, V2b touch responses + V4a command interneurons (DESIGN.md 7.2); V1c and ablations (V2d) held out'
-          : 'V1a crawling + V1b swimming gait (DESIGN.md 7.2); V1c held out',
+          : task === 'steer'
+            ? 'V1a, V1b gait + backing up while AVA is lit (DESIGN.md 7.2); V1c and ablations held out'
+            : 'V1a crawling + V1b swimming gait (DESIGN.md 7.2); V1c held out',
       cost: topCost,
       seed,
       ...(fromIdx >= 0 ? { continuedFrom: args[fromIdx + 1]!.split('/').pop() ?? '' } : {}),
@@ -119,11 +125,12 @@ for (let gen = 0; gen < generations; gen++) {
       agar: fmt(best.score!.agar),
       water: fmt(best.score!.water),
       ...(task === 'touch' ? { touch: fmtTouch(best.score as TouchScore) } : {}),
+      ...(task === 'steer' ? { steer: fmtSteer(best.score as SteerScore) } : {}),
     };
     writeFileSync(`${out}/${runName}.json`, JSON.stringify(fit, null, 1) + '\n');
   }
   const s = scores[top]!;
-  appendFileSync(log, `gen ${gen} best ${topCost.toFixed(3)} (ever ${best.cost.toFixed(3)}) σ ${sigma.toFixed(3)} | agar ${fmt(s.agar)} | water ${fmt(s.water)} | g ${(s.conductance ?? 0).toFixed(2)}${task === 'touch' && !s.error ? ' | ' + fmtTouch(s as TouchScore) : ''}${s.error ? ' ERR ' + s.error : ''}\n`);
+  appendFileSync(log, `gen ${gen} best ${topCost.toFixed(3)} (ever ${best.cost.toFixed(3)}) σ ${sigma.toFixed(3)} | agar ${fmt(s.agar)} | water ${fmt(s.water)} | g ${(s.conductance ?? 0).toFixed(2)}${task === 'touch' && !s.error ? ' | ' + fmtTouch(s as TouchScore) : ''}${task === 'steer' && !s.error ? ' | ' + fmtSteer(s as SteerScore) : ''}${s.error ? ' ERR ' + s.error : ''}\n`);
 
   // Update (sep-CMA-ES).
   const old = mean;

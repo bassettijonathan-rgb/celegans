@@ -6,7 +6,7 @@
 import { NODES } from '../../src/sim/body';
 import { NEURON_COUNT, cellIndex, connectome } from '../../src/sim/connectome';
 import { GaitRecorder, type Gait } from '../../src/sim/gait';
-import { createWorld, setMedium, step, touchBody, type Brain, type World } from '../../src/sim/world';
+import { createWorld, setLight, setMedium, step, touchBody, type Brain, type World } from '../../src/sim/world';
 
 /** Crawling time before the touch, and the windows compared (ms). */
 export const SETTLE_MS = 3000;
@@ -159,4 +159,41 @@ export function touchFrom(s: Settled, b: Brain, at: number | null, sham?: number
 export function touchTrial(b: Brain, at: number, seed: number): TouchTrial {
   const s = settle(b, seed);
   return touchFrom(s, b, at, touchFrom(s, b, null).vel);
+}
+
+/** How long the light stays on in a drive trial (ms); the rest of AFTER_MS is dark. */
+export const LIGHT_MS = 2000;
+
+/**
+ * Shines light on a copy of a settled worm: each listed neuron gets a
+ * light-gated conductance (nS, signed) for LIGHT_MS, then the light goes
+ * off. `minSpeed` and `reversed` compare against the sham trial.
+ */
+export function driveFrom(s: Settled, b: Brain, light: Record<number, number>, sham: number[]): TouchTrial {
+  const w = structuredClone(s.world);
+  const r = record(w, b, AFTER_MS, (k) => {
+    if (k === 0) for (const [c, g] of Object.entries(light)) setLight(w, Number(c), g);
+    if (k === LIGHT_MS) w.light.fill(0);
+  });
+  const rel = r.vel.map((v, k) => v - sham[k]! + s.speed);
+  let latency = -1;
+  let minSpeed = Infinity;
+  for (let k = 0; k + WINDOW_MS <= LIGHT_MS; k += 50) {
+    const v = avg(rel, k, k + WINDOW_MS);
+    minSpeed = Math.min(minSpeed, v);
+    if (latency < 0 && v < -REVERSE_SPEED) latency = k;
+  }
+  return {
+    before: s.speed,
+    after: avg(r.vel, 0, LIGHT_MS),
+    reversed: latency >= 0,
+    latency,
+    avaBefore: s.ava,
+    avaAfter: avg(r.va, 0, LIGHT_MS),
+    avbBefore: s.avb,
+    avbAfter: avg(r.vb, 0, LIGHT_MS),
+    minSpeed,
+    recovered: avg(r.vel, AFTER_MS - RECOVERY_MS),
+    vel: r.vel,
+  };
 }

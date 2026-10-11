@@ -7,7 +7,7 @@ import type { Fit } from '../../src/sim/fit';
 import { NEURON_COUNT } from '../../src/sim/connectome';
 import type { Network } from '../../src/sim/neurons';
 import { buildBrain, createWorld, network, setMedium, step, type Brain } from '../../src/sim/world';
-import { settleWithGait, touchFrom, type TouchTrial } from './touchTrial';
+import { cellsOfClasses, driveFrom, settleWithGait, touchFrom, type TouchTrial } from './touchTrial';
 
 /**
  * Targets from DESIGN.md section 9 (V1a, V1b), Fang-Yen et al. 2010 ≈:
@@ -149,4 +149,37 @@ export function scoreTouch(fit: Fit, seed = 1): TouchScore {
   const conductance = conductanceCost(b.net);
   const cost = gaitCost(agar, TARGETS.agar) + gaitCost(water, TARGETS.water) + touchCost(anterior, posterior) + conductance;
   return { cost, conductance, agar, water, anterior, posterior };
+}
+
+/**
+ * Steering (M4): light on AVA makes the worm back up while the light is on
+ * and crawl forward again after it (Guo et al. 2009 ≈; Kawano et al. 2011 ≈:
+ * optogenetic AVA activation causes reversals). The light conductance is a
+ * guess, about a channelrhodopsin's at saturating light.
+ */
+export const AVA_LIGHT = 2;
+
+export interface SteerScore extends Score {
+  ava: TouchTrial;
+}
+
+export function steerCost(t: TouchTrial): number {
+  let c = 0;
+  if (t.minSpeed > -TARGET_REVERSE) c += 4 * ((t.minSpeed + TARGET_REVERSE) / TARGET_REVERSE) ** 2;
+  c += Math.max(0, (0.05 - t.recovered) / 0.05) ** 2;
+  return c;
+}
+
+export function scoreSteer(fit: Fit, seed = 1): SteerScore {
+  const b = buildBrain(fit);
+  const s = settleWithGait(b, seed, 2000, 6000);
+  const agar = s.gait;
+  const water = gaitIn(b, TARGETS.water.mix, seed, 1000, 2000);
+  const sham = touchFrom(s, b, null).vel;
+  const light: Record<number, number> = {};
+  for (const c of cellsOfClasses(['AVA'])) light[c] = AVA_LIGHT;
+  const ava = driveFrom(s, b, light, sham);
+  const conductance = conductanceCost(b.net);
+  const cost = gaitCost(agar, TARGETS.agar) + gaitCost(water, TARGETS.water) + steerCost(ava) + conductance;
+  return { cost, conductance, agar, water, ava };
 }

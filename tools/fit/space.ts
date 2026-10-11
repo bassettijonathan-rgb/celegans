@@ -24,7 +24,7 @@ export const PROPRIO = ['DB', 'VB', 'DA', 'VA', 'SMD'];
  * AVA during reversals, Kato et al. 2015 ≈).
  */
 export const TOUCH = ['ALM', 'AVM', 'PLM', 'PVM', 'DVA', 'LUA', 'RIM'];
-export type Task = 'gait' | 'touch';
+export type Task = 'gait' | 'steer' | 'touch';
 /**
  * Command interneurons: hubs with hundreds of inputs from outside the motor
  * and touch circuits. With every synapse at the same default strength, those
@@ -32,7 +32,7 @@ export type Task = 'gait' | 'touch';
  * scales each hub's outside inputs together, one number per hub and kind.
  */
 export const COMMAND = ['AVA', 'AVB', 'AVD', 'AVE', 'PVC'];
-export const CIRCUIT: Record<Task, string[]> = { gait: MOTOR, touch: [...MOTOR, ...TOUCH] };
+export const CIRCUIT: Record<Task, string[]> = { gait: MOTOR, steer: MOTOR, touch: [...MOTOR, ...TOUCH] };
 const MIN_SECTIONS = 10;
 
 export interface Dim {
@@ -80,7 +80,7 @@ export function buildSpace(proprio: string[] = PROPRIO, task: Task = 'gait'): Sp
   const smallGap = sorted(gap).filter((k) => gap.get(k)! < MIN_SECTIONS);
   const otherChem = new Map<string, string[]>();
   const otherGap = new Map<string, string[]>();
-  if (task === 'touch') {
+  if (task !== 'gait') {
     const add = (m: Map<string, string[]>, cmd: string, k: string) => {
       const list = m.get(cmd) ?? [];
       if (!list.includes(k)) list.push(k);
