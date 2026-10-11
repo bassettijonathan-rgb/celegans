@@ -123,7 +123,7 @@ for (let gen = 0; gen < generations; gen++) {
     writeFileSync(`${out}/${runName}.json`, JSON.stringify(fit, null, 1) + '\n');
   }
   const s = scores[top]!;
-  appendFileSync(log, `gen ${gen} best ${topCost.toFixed(3)} (ever ${best.cost.toFixed(3)}) σ ${sigma.toFixed(3)} | agar ${fmt(s.agar)} | water ${fmt(s.water)}${task === 'touch' && !s.error ? ' | ' + fmtTouch(s as TouchScore) : ''}${s.error ? ' ERR ' + s.error : ''}\n`);
+  appendFileSync(log, `gen ${gen} best ${topCost.toFixed(3)} (ever ${best.cost.toFixed(3)}) σ ${sigma.toFixed(3)} | agar ${fmt(s.agar)} | water ${fmt(s.water)} | g ${(s.conductance ?? 0).toFixed(2)}${task === 'touch' && !s.error ? ' | ' + fmtTouch(s as TouchScore) : ''}${s.error ? ' ERR ' + s.error : ''}\n`);
 
   // Update (sep-CMA-ES).
   const old = mean;

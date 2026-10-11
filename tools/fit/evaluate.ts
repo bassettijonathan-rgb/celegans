@@ -4,7 +4,9 @@
  */
 import { GaitRecorder, type Gait } from '../../src/sim/gait';
 import type { Fit } from '../../src/sim/fit';
-import { buildBrain, createWorld, setMedium, step, type Brain } from '../../src/sim/world';
+import { NEURON_COUNT } from '../../src/sim/connectome';
+import type { Network } from '../../src/sim/neurons';
+import { buildBrain, createWorld, network, setMedium, step, type Brain } from '../../src/sim/world';
 import { settleWithGait, touchFrom, type TouchTrial } from './touchTrial';
 
 /**
@@ -53,15 +55,54 @@ export function gaitCost(g: Gait, target: { frequency: readonly [number, number]
 
 export interface Score {
   cost: number;
+  /** The input-conductance penalty included in cost. */
+  conductance?: number;
   agar: Gait;
   water: Gait;
+}
+
+/**
+ * A neuron's resting input conductance (nS): leak, every chemical synapse
+ * half open, every gap junction. Real C. elegans neurons have input
+ * resistances in the GΩ range (Goodman et al. 1998 ≈), about 1 nS; the
+ * unfitted model's are 0.1 to 39 nS (median 1.4). The first gait fit let
+ * motor cells reach 1,000 nS, which clamps them so no input can move them.
+ */
+export function inputConductance(net: Network, i: number): number {
+  let g = net.params.gLeak;
+  for (let k = net.synStart[i]!; k < net.synStart[i + 1]!; k++) g += 0.5 * net.synG[k]!;
+  for (let k = net.gapStart[i]!; k < net.gapStart[i + 1]!; k++) g += net.gapG[k]!;
+  return g;
+}
+
+/** The fit may not push any neuron past the largest input conductance in the unfitted wiring. */
+let unfittedMax: number | undefined;
+export function maxInputConductance(): number {
+  if (unfittedMax === undefined) {
+    const net = network();
+    unfittedMax = 0;
+    for (let i = 0; i < NEURON_COUNT; i++) unfittedMax = Math.max(unfittedMax, inputConductance(net, i));
+  }
+  return unfittedMax;
+}
+
+/** Penalty: Σ over neurons of (log10 of how far past the cap) squared, ×4. */
+export function conductanceCost(net: Network): number {
+  const cap = maxInputConductance();
+  let c = 0;
+  for (let i = 0; i < NEURON_COUNT; i++) {
+    const over = Math.log10(inputConductance(net, i) / cap);
+    if (over > 0) c += 4 * over * over;
+  }
+  return c;
 }
 
 export function score(fit: Fit, seed = 1): Score {
   const b = buildBrain(fit);
   const agar = gaitIn(b, TARGETS.agar.mix, seed, 2000, 6000);
   const water = gaitIn(b, TARGETS.water.mix, seed, 1000, 2000);
-  return { cost: gaitCost(agar, TARGETS.agar) + gaitCost(water, TARGETS.water), agar, water };
+  const conductance = conductanceCost(b.net);
+  return { cost: gaitCost(agar, TARGETS.agar) + gaitCost(water, TARGETS.water) + conductance, conductance, agar, water };
 }
 
 /**
@@ -105,6 +146,7 @@ export function scoreTouch(fit: Fit, seed = 1): TouchScore {
   const sham = touchFrom(s, b, null).vel;
   const anterior = touchFrom(s, b, TOUCH_AT.anterior, sham);
   const posterior = touchFrom(s, b, TOUCH_AT.posterior, sham);
-  const cost = gaitCost(agar, TARGETS.agar) + gaitCost(water, TARGETS.water) + touchCost(anterior, posterior);
-  return { cost, agar, water, anterior, posterior };
+  const conductance = conductanceCost(b.net);
+  const cost = gaitCost(agar, TARGETS.agar) + gaitCost(water, TARGETS.water) + touchCost(anterior, posterior) + conductance;
+  return { cost, conductance, agar, water, anterior, posterior };
 }
