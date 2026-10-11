@@ -24,7 +24,7 @@
  * conductance-based cells arrive.
  */
 import { connectome } from './connectome';
-import { UNFITTED, biasCurrents, chemScale, gapScale, type Fit } from './fit';
+import { UNFITTED, biasConductances, chemScale, gapScale, type Fit } from './fit';
 import type { Rng } from './rng';
 
 /**
@@ -89,7 +89,11 @@ export interface Network {
   gapG: Float64Array;
   /** Release threshold per neuron: its voltage at equilibrium with every synapse half open (Kunert 2014). */
   vTh: Float64Array;
-  /** Tonic current per cell from a fit, pA (0 when unfitted). */
+  /**
+   * Tonic conductance per cell from a fit, nS, signed: positive to eExc,
+   * negative to eInh (0 when unfitted). A conductance, not a current, so it
+   * can never push a cell beyond the reversal potentials.
+   */
   bias: Float64Array;
 }
 
@@ -112,7 +116,7 @@ export function buildNetwork(params: NeuronParams = DEFAULT_PARAMS, fit: Fit = U
     gap.map((e) => ({ a: e.a, b: e.b, synapses: (e.size / sectionsPerSynapse.gap) * gapScale(fit, e.a, e.b) })),
     params,
   );
-  net.bias.set(biasCurrents(fit));
+  net.bias.set(biasConductances(fit));
   return net;
 }
 
@@ -191,8 +195,9 @@ export interface NeuronState {
   /** Injected current per cell, pA (the lab bench's electrode or light). */
   inject: Float64Array;
   /**
-   * Current from the cell's own sensory receptors, pA (proprioception; later
-   * touch and salt), set every step. Optional so small test circuits can leave it out.
+   * Conductance of the cell's own sensory channels, nS, signed like `bias`
+   * (proprioception; later touch and salt), set every step. Optional so small
+   * test circuits can leave it out.
    */
   sense?: Float64Array;
 }
@@ -219,14 +224,18 @@ export function stepNeurons(net: Network, state: NeuronState, dt: number, rng?: 
     if (!rng) throw new Error('noise needs an rng');
     for (let i = 0; i < n; i++) noise[i] = noiseScale * rng.normal();
   }
+  // Tonic and sensory channels: signed conductances (positive to eExc, negative to eInh).
+  const tonic = new Float64Array(n);
+  for (let i = 0; i < n; i++) tonic[i] = Math.abs(net.bias[i]! + (state.sense?.[i] ?? 0));
   const rhs = (i: number) => {
-    let b =
-      cdt * v0[i]! + params.gLeak * params.eLeak + net.bias[i]! + state.inject[i]! + (state.sense?.[i] ?? 0) + noise[i]!;
+    const g = net.bias[i]! + (state.sense?.[i] ?? 0);
+    let b = cdt * v0[i]! + params.gLeak * params.eLeak + state.inject[i]! + noise[i]!;
+    b += g > 0 ? g * params.eExc : -g * params.eInh;
     for (let k = net.synStart[i]!; k < net.synStart[i + 1]!; k++) b += net.synG[k]! * s[net.synPre[k]!]! * net.synE[k]!;
     return b;
   };
   const v = Float64Array.from(v0);
-  solveImplicit(net, s, cdt, v, rhs, v);
+  solveImplicit(net, s, cdt, v, rhs, v, tonic);
   state.v.set(v);
 }
 
@@ -242,12 +251,13 @@ function solveImplicit(
   guess: Float64Array,
   rhsOf: (i: number) => number,
   out: Float64Array,
+  extra?: Float64Array,
 ): void {
   const { n, params } = net;
   const diag = new Float64Array(n);
   const b = new Float64Array(n);
   for (let i = 0; i < n; i++) {
-    let d = cdt + params.gLeak;
+    let d = cdt + params.gLeak + (extra?.[i] ?? 0);
     for (let k = net.synStart[i]!; k < net.synStart[i + 1]!; k++) d += net.synG[k]! * s[net.synPre[k]!]!;
     for (let k = net.gapStart[i]!; k < net.gapStart[i + 1]!; k++) d += net.gapG[k]!;
     diag[i] = d;

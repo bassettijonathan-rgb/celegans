@@ -3,9 +3,10 @@ import { parentPort } from 'node:worker_threads';
 import { score } from './evaluate';
 import { buildSpace, toFit } from './space';
 
-const space = buildSpace();
-parentPort!.on('message', (msg: { id: number; x: number[]; seed: number }) => {
+let space = buildSpace();
+parentPort!.on('message', (msg: { id: number; x: number[]; seed: number; proprio: string[] }) => {
   try {
+    if (space.proprio.join() !== msg.proprio.join()) space = buildSpace(msg.proprio);
     const s = score(toFit(space, msg.x, 'candidate'), msg.seed);
     parentPort!.postMessage({ id: msg.id, ...s });
   } catch (e) {

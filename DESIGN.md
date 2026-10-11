@@ -246,6 +246,14 @@ and the fit decides on which side. Each class reads the mean curvature over a re
 body length behind it. DVA is left out for now: its single long process runs the length
 of the body, so it needs a receptive field rather than a point.
 
+Changed in M3b: proprioception and the fitted tonic drive are **conductances, not currents**.
+`gain · side · κL` is now a signed conductance in nS: positive opens a channel to the excitatory
+reversal (0 mV), negative one to the inhibitory reversal (−48 mV), as stretch-gated cation and
+chloride channels would. The first M3b fit, with currents, found a gait by driving motor neurons to
+±1,000 mV and beyond, which no real cell can do; with conductances every cell stays between the
+reversal potentials by construction (tested in `tests/fit.test.ts`). Currents remain only for the
+lab bench's electrode.
+
 ---
 
 ## 5. The motor system
@@ -498,6 +506,33 @@ Each runs over 10 seeds × the ensemble and prints pass/fail with the number. **
 | V4b | The other half of Randi 2023's atlas | correlation of predicted vs measured responses, reported against a shuffled-connectome baseline | **H** |
 | V5 | Rhythm mechanism (D8) | which of the switchable mechanisms V1c needs; a result, not a pass/fail | – |
 
+### 9.1 Results: M3b (one fit, `src/data/fits/gait.json`)
+
+One gait fit so far, not yet the ensemble of 10 (that comes with M5). Every cell stays between the
+reversal potentials (−48 to 0 mV). Gait measured on seed 1; seeds 2–6 give the same gait within
+0.01 Hz and 0.01 body lengths.
+
+| # | Result | Verdict |
+|---|---|---|
+| V1a | agar: 0.47 Hz, wavelength 0.65 L, κL 3.1, forward 0.19 mm/s | pass |
+| V1b | water: 1.92 Hz, wavelength 1.32 L, κL 3.2, forward 0.10 mm/s | pass |
+| V1c | frequency falls smoothly and monotonically (1.92 → 0.47 Hz). Wavelength does not: it stays at ≈ 1.33 L up to 70% of the way from water to agar, jumps to 1.93 L at 80%, then drops to 0.70 and 0.65 L. Real worms change smoothly | **fail** |
+| V5 | the rhythm needs stretch feedback (without it nothing moves), and specifically the A cells' (DA or VA off: no gait); B-cell and SMD stretch barely matter | result |
+
+V5 disagrees with the evidence: in real worms B cells carry forward undulation by sensing the bend
+just ahead of them (Wen et al. 2012) and A cells drive backward movement. The fit found a way to
+move the body that is not the real worm's. A second fit allowed stretch feedback only in B cells
+and SMD (`npm run fit -- --proprio DB,VB,SMD`), from a hand probe where each B cell is excited
+when its own side bends just ahead of it. That probe swims forward in water (1.0 Hz, wavelength
+1.2 L) but does not crawl; in 60 generations the search found nothing that crawls on agar and
+mostly nothing that moves at all, so the shipped fit is the A-cell one above. This is the first
+model-level finding of the project: with the connectome, graded neurons and stretch feedback
+alone, the gait targets are reachable but the viscosity curve is not. The head oscillator (D8),
+which this fit does not yet have, is the next candidate. Note that V1c has now been looked at, so
+any later fit that passes it is weaker evidence than a first look. Tools: `npm run viscosity --
+<fit.json>` (V1c), `npm run rhythm` (V5); tests in `tests/science/gait.test.ts`, where V1c is
+marked as a known failure.
+
 Honest expectations: V1 and V2 should pass. V3b and V4b are the hardest; V4b may come out only
 modestly above baseline, and that would be a real finding about connectome-only models, reported
 as such rather than tuned away.
@@ -562,10 +597,14 @@ the worker setup. Its body code does not (D9), and that repo is not changed.
 - **M3 Locomotion.** Motor circuit wired to the body, proprioception, both rhythm mechanisms,
   first fits. V1a–c, V5. *Visible:* the worm crawls and swims on its own brain. Two pull requests:
   M3a wires muscles and proprioception (done; see 4.4 and 6.4) and adds the fit machinery: a fit is
-  plain JSON of class-pair strengths, tonic currents per class and proprioceptive fields
+  plain JSON of class-pair strengths, tonic conductances per class (changed from currents in M3b,
+  see 4.4) and proprioceptive fields
   (`src/sim/fit.ts`); `npm run fit` runs separable CMA-ES over the motor circuit (127 numbers)
-  scored on V1a and V1b only; gait is measured from body curvature (`src/sim/gait.ts`). M3b adds
-  the rhythm mechanisms, the fits and their results.
+  scored on V1a and V1b only; gait is measured from body curvature (`src/sim/gait.ts`). M3b
+  (done) fits the strengths, makes the fit the app's default brain (the worm crawls and swims on
+  its own; the puppet is now opt-in) and reports V1 and V5 in 9.1: V1a and V1b pass, V1c fails.
+  The head oscillator and intrinsic A-cell oscillation (D8) are not built yet; the A-cell model
+  needs the papers M1b is waiting for.
 - **M4 Touch and reversals.** Touch receptors, nose touch, command switch, omega turns, spontaneous
   reversals. V2a–e, V4a. Ablation and optogenetics tools.
 - **M5 Salt chemotaxis.** Salt field, ASE, full fitting ensemble. V3a–c, V4b.

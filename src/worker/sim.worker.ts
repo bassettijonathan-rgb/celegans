@@ -4,6 +4,7 @@
  * steps to run per real interval.
  */
 import { STEPS_PER_SECOND } from '../sim/time';
+import { appBrain } from '../sim/fits';
 import { createWorld, setInjection, setMedium, setPuppet, step, type World } from '../sim/world';
 import type { FromWorker, ToWorker } from './protocol';
 
@@ -35,7 +36,7 @@ function sendTick(w: World): void {
 onmessage = (e: MessageEvent<ToWorker>) => {
   const msg = e.data;
   if (msg.type === 'start') {
-    world = createWorld(msg.seed);
+    world = createWorld(msg.seed, appBrain());
     owed = 0;
     post({ type: 'plate', radius: world.plateRadius, medium: world.medium, rest: world.neurons.v.slice() });
     sendTick(world);
@@ -60,7 +61,7 @@ setInterval(() => {
   if (!world || speed <= 0) return;
   owed += (speed * STEPS_PER_SECOND * INTERVAL_MS) / 1000;
   while (owed >= 1) {
-    step(world);
+    step(world, appBrain());
     owed -= 1;
   }
   sendTick(world);
