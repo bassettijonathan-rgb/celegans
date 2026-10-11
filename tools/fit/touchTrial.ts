@@ -113,14 +113,29 @@ export function settleWithGait(b: Brain, seed: number, transientMs: number, meas
   return { world: w, speed: avg(r.vel, from), ava: avg(r.va, from), avb: avg(r.vb, from), gait: rec.result() };
 }
 
-/** Touches a copy of a settled worm at body fraction `at` and records AFTER_MS. */
-export function touchFrom(s: Settled, b: Brain, at: number): TouchResult & { minSpeed: number; recovered: number } {
+export type TouchTrial = TouchResult & {
+  /** Slowest WINDOW_MS speed in the first second after the touch, mm/s. */
+  minSpeed: number;
+  /** Mean speed over the last RECOVERY_MS. */
+  recovered: number;
+  /** Velocity towards the head each ms after the touch. */
+  vel: number[];
+};
+
+/**
+ * Touches a copy of a settled worm at body fraction `at` (null: a sham
+ * trial, no touch) and records AFTER_MS. With a sham trial's velocities,
+ * `minSpeed` and `reversed` compare against it, so the head's sweep, which
+ * moves the centroid back and forth during every undulation, cancels out.
+ */
+export function touchFrom(s: Settled, b: Brain, at: number | null, sham?: number[]): TouchTrial {
   const w = structuredClone(s.world);
-  const r = record(w, b, AFTER_MS, (k) => k === 0 && touchBody(w, at));
+  const r = record(w, b, AFTER_MS, (k) => k === 0 && at !== null && touchBody(w, at));
+  const rel = sham ? r.vel.map((v, k) => v - sham[k]! + s.speed) : r.vel;
   let latency = -1;
   let minSpeed = Infinity;
   for (let k = 0; k + WINDOW_MS <= 1000 + WINDOW_MS; k += 50) {
-    const v = avg(r.vel, k, k + WINDOW_MS);
+    const v = avg(rel, k, k + WINDOW_MS);
     minSpeed = Math.min(minSpeed, v);
     if (latency < 0 && v < -REVERSE_SPEED) latency = k;
   }
@@ -136,9 +151,12 @@ export function touchFrom(s: Settled, b: Brain, at: number): TouchResult & { min
     avbAfter: avg(r.vb, 0, early),
     minSpeed,
     recovered: avg(r.vel, AFTER_MS - RECOVERY_MS),
+    vel: r.vel,
   };
 }
 
-export function touchTrial(b: Brain, at: number, seed: number) {
-  return touchFrom(settle(b, seed), b, at);
+/** A touch trial compared against a sham trial from the same moment. */
+export function touchTrial(b: Brain, at: number, seed: number): TouchTrial {
+  const s = settle(b, seed);
+  return touchFrom(s, b, at, touchFrom(s, b, null).vel);
 }
