@@ -28,7 +28,7 @@ describe('V1 gait on the shipped fit', () => {
   }, 120_000);
 
   it('V1c (held out): frequency and wavelength fall steadily from water to agar', () => {
-    const mixes = [0, 0.25, 0.5, 0.75, 1];
+    const mixes = Array.from({ length: 11 }, (_, k) => k / 10);
     const gaits = mixes.map((mix) => gaitIn(appBrain(), mix, 1, 1000 + 1000 * mix, 3000 + 3000 * mix));
     for (let k = 1; k < gaits.length; k++) {
       // 5% slack for measurement noise between neighbouring media.
@@ -36,5 +36,5 @@ describe('V1 gait on the shipped fit', () => {
       expect(gaits[k]!.wavelength).toBeLessThanOrEqual(gaits[k - 1]!.wavelength * 1.05);
       expect(gaits[k]!.speed).toBeGreaterThan(0);
     }
-  }, 300_000);
+  }, 600_000);
 });

@@ -34,9 +34,11 @@ export interface Space {
   gapKeys: string[];
   smallChem: string[];
   smallGap: string[];
+  /** Classes whose stretch feedback is fitted; the others have none. */
+  proprio: string[];
 }
 
-export function buildSpace(): Space {
+export function buildSpace(proprio: string[] = PROPRIO): Space {
   const inMotor = (i: number) => MOTOR.includes(fitClass(connectome.cells[i]!));
   const chem = new Map<string, number>();
   for (const e of connectome.chemical) {
@@ -63,13 +65,13 @@ export function buildSpace(): Space {
     ...gapKeys.map((k) => w(`gap:${k}`)),
     w('gap:small'),
     ...MOTOR.filter((c) => c !== 'BWM').map((c) => ({ name: `bias:${c}`, centre: 0, scale: 0.3, lo: -3, hi: 3 })),
-    ...PROPRIO.flatMap((c) => [
+    ...proprio.flatMap((c) => [
       { name: `gain:${c}`, centre: c === 'DB' || c === 'VB' ? -3 : 0, scale: 2, lo: -30, hi: 30 },
       { name: `offset:${c}`, centre: -0.15, scale: 0.1, lo: -0.5, hi: 0.5 },
       { name: `extent:${c}`, centre: 0.15, scale: 0.1, lo: 0, hi: 0.6 },
     ]),
   ];
-  return { dims, chemKeys, gapKeys, smallChem, smallGap };
+  return { dims, chemKeys, gapKeys, smallChem, smallGap, proprio };
 }
 
 /** Parameter value of dimension d for search coordinate x (unit-scaled, clamped to the range). */
@@ -85,7 +87,7 @@ export function toFit(space: Space, x: ArrayLike<number>, name: string): Fit {
   for (const k of space.gapKeys) fit.gap[k] = v.get(`gap:${k}`)!;
   for (const k of space.smallGap) fit.gap[k] = v.get('gap:small')!;
   for (const c of MOTOR) if (c !== 'BWM') fit.bias[c] = v.get(`bias:${c}`)!;
-  for (const c of PROPRIO) {
+  for (const c of space.proprio) {
     fit.proprio.push({ cls: c, gain: v.get(`gain:${c}`)!, offset: v.get(`offset:${c}`)!, extent: v.get(`extent:${c}`)! });
   }
   return fit;

@@ -5,6 +5,7 @@
  *
  *   npm run fit -- --seed 1 --generations 200 [--workers 4] [--out dir]
  *     [--from fit.json --sigma 0.3 --name gait-3b]   continue from a saved fit
+ *     [--proprio DB,VB,SMD]   which classes get fitted stretch feedback (default all in space.ts)
  *
  * Deterministic for a given seed and worker count does not matter: each
  * candidate is scored independently.
@@ -28,7 +29,8 @@ const outIdx = args.indexOf('--out');
 const out = outIdx >= 0 ? args[outIdx + 1]! : 'fits';
 mkdirSync(out, { recursive: true });
 
-const space = buildSpace();
+const proprioIdx = args.indexOf('--proprio');
+const space = buildSpace(proprioIdx >= 0 ? args[proprioIdx + 1]!.split(',') : undefined);
 const n = space.dims.length;
 const rng = new Rng(seed, Purpose.sim);
 
@@ -62,7 +64,7 @@ function evaluate(xs: Float64Array[]): Promise<(Score & { error?: string })[]> {
     const feed = (w: Worker) => {
       if (next >= xs.length) return;
       const id = next++;
-      w.postMessage({ id, x: [...xs[id]!], seed: 1 });
+      w.postMessage({ id, x: [...xs[id]!], seed: 1, proprio: space.proprio });
     };
     for (const w of pool) {
       w.removeAllListeners('message');
@@ -80,7 +82,7 @@ function evaluate(xs: Float64Array[]): Promise<(Score & { error?: string })[]> {
 const nameIdx = args.indexOf('--name');
 const runName = nameIdx >= 0 ? args[nameIdx + 1]! : `gait-${seed}`;
 const log = `${out}/${runName}.log`;
-writeFileSync(log, `gait fit seed ${seed}, ${n} dims, lambda ${lambda}\n`);
+writeFileSync(log, `gait fit seed ${seed}, ${n} dims, lambda ${lambda}, stretch feedback in ${space.proprio.join(' ')}\n`);
 let best = { cost: Infinity, x: new Float64Array(n), score: undefined as Score | undefined };
 const fmt = (g: Score['agar']) =>
   `${g.frequency.toFixed(2)} Hz λ ${g.wavelength.toFixed(2)} κL ${g.amplitude.toFixed(1)} v ${g.speed.toFixed(3)} coh ${g.coherence.toFixed(2)}`;
