@@ -4,14 +4,16 @@
  * proprioception, scored on crawling and swimming gait (V1a, V1b).
  *
  *   npm run fit -- --seed 1 --generations 200 [--workers 4] [--out dir]
+ *     [--from fit.json --sigma 0.3 --name gait-3b]   continue from a saved fit
  *
  * Deterministic for a given seed and worker count does not matter: each
  * candidate is scored independently.
  */
 import { Worker } from 'node:worker_threads';
-import { mkdirSync, writeFileSync, appendFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync, appendFileSync } from 'node:fs';
 import { Purpose, Rng } from '../src/sim/rng';
-import { buildSpace, toFit } from './fit/space';
+import { buildSpace, fromFit, toFit } from './fit/space';
+import type { Fit } from '../src/sim/fit';
 import type { Score } from './fit/evaluate';
 
 const args = process.argv.slice(2);
@@ -44,8 +46,9 @@ const c1 = ((n + 2) / 3) * (2 / ((n + 1.3) ** 2 + muEff));
 const cMu = Math.min(1 - c1, ((n + 2) / 3) * ((2 * (muEff - 2 + 1 / muEff)) / ((n + 2) ** 2 + muEff)));
 const chiN = Math.sqrt(n) * (1 - 1 / (4 * n) + 1 / (21 * n * n));
 
-let mean = new Float64Array(n);
-let sigma = 1;
+const fromIdx = args.indexOf('--from');
+let mean = fromIdx >= 0 ? fromFit(space, JSON.parse(readFileSync(args[fromIdx + 1]!, 'utf8')) as Fit) : new Float64Array(n);
+let sigma = opt('sigma', 1);
 const diag = new Float64Array(n).fill(1);
 const ps = new Float64Array(n);
 const pc = new Float64Array(n);
@@ -74,7 +77,9 @@ function evaluate(xs: Float64Array[]): Promise<(Score & { error?: string })[]> {
   });
 }
 
-const log = `${out}/gait-${seed}.log`;
+const nameIdx = args.indexOf('--name');
+const runName = nameIdx >= 0 ? args[nameIdx + 1]! : `gait-${seed}`;
+const log = `${out}/${runName}.log`;
 writeFileSync(log, `gait fit seed ${seed}, ${n} dims, lambda ${lambda}\n`);
 let best = { cost: Infinity, x: new Float64Array(n), score: undefined as Score | undefined };
 const fmt = (g: Score['agar']) =>
@@ -93,16 +98,17 @@ for (let gen = 0; gen < generations; gen++) {
   const [topCost, top] = order[0]!;
   if (topCost < best.cost) {
     best = { cost: topCost, x: Float64Array.from(xs[top]!), score: scores[top] };
-    const fit = toFit(space, best.x, `gait-${seed}`);
+    const fit = toFit(space, best.x, runName);
     fit.meta = {
       fittedTo: 'V1a crawling + V1b swimming gait (DESIGN.md 7.2); V1c held out',
       cost: topCost,
       seed,
+      ...(fromIdx >= 0 ? { continuedFrom: args[fromIdx + 1]!.split('/').pop() ?? '' } : {}),
       generation: gen,
       agar: fmt(best.score!.agar),
       water: fmt(best.score!.water),
     };
-    writeFileSync(`${out}/gait-${seed}.json`, JSON.stringify(fit, null, 1) + '\n');
+    writeFileSync(`${out}/${runName}.json`, JSON.stringify(fit, null, 1) + '\n');
   }
   const s = scores[top]!;
   appendFileSync(log, `gen ${gen} best ${topCost.toFixed(3)} (ever ${best.cost.toFixed(3)}) σ ${sigma.toFixed(3)} | agar ${fmt(s.agar)} | water ${fmt(s.water)}${s.error ? ' ERR ' + s.error : ''}\n`);

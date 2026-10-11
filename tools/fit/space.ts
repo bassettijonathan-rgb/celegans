@@ -90,3 +90,19 @@ export function toFit(space: Space, x: ArrayLike<number>, name: string): Fit {
   }
   return fit;
 }
+
+/** Search coordinates of a fit (the inverse of toFit), to continue a search from it. */
+export function fromFit(space: Space, fit: Fit): Float64Array {
+  const v = new Map<string, number>();
+  for (const k of space.chemKeys) v.set(`chem:${k}`, fit.chem[k] ?? 0);
+  v.set('chem:small', space.smallChem.length ? (fit.chem[space.smallChem[0]!] ?? 0) : 0);
+  for (const k of space.gapKeys) v.set(`gap:${k}`, fit.gap[k] ?? 0);
+  v.set('gap:small', space.smallGap.length ? (fit.gap[space.smallGap[0]!] ?? 0) : 0);
+  for (const [c, b] of Object.entries(fit.bias)) v.set(`bias:${c}`, b);
+  for (const r of fit.proprio) {
+    v.set(`gain:${r.cls}`, r.gain);
+    v.set(`offset:${r.cls}`, r.offset);
+    v.set(`extent:${r.cls}`, r.extent);
+  }
+  return Float64Array.from(space.dims, (d) => ((v.get(d.name) ?? d.centre) - d.centre) / d.scale);
+}
