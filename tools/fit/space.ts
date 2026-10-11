@@ -18,6 +18,14 @@ import { chemKey, fitClass, gapKey, type Fit } from '../../src/sim/fit';
 
 export const MOTOR = ['DB', 'VB', 'DA', 'VA', 'DD', 'VD', 'AS', 'AVB', 'AVA', 'AVD', 'AVE', 'PVC', 'SMD', 'RMD', 'SMB', 'RME', 'BWM'];
 export const PROPRIO = ['DB', 'VB', 'DA', 'VA', 'SMD'];
+/**
+ * The touch circuit added for M4 (Chalfie et al. 1985 ≈; DESIGN.md 5.1, 8.2):
+ * the six touch receptors, DVA and LUA (PLM's partners) and RIM (coupled to
+ * AVA during reversals, Kato et al. 2015 ≈).
+ */
+export const TOUCH = ['ALM', 'AVM', 'PLM', 'PVM', 'DVA', 'LUA', 'RIM'];
+export type Task = 'gait' | 'touch';
+export const CIRCUIT: Record<Task, string[]> = { gait: MOTOR, touch: [...MOTOR, ...TOUCH] };
 const MIN_SECTIONS = 10;
 
 export interface Dim {
@@ -36,10 +44,13 @@ export interface Space {
   smallGap: string[];
   /** Classes whose stretch feedback is fitted; the others have none. */
   proprio: string[];
+  /** What is fitted: the gait alone, or the gait and the touch responses. */
+  task: Task;
 }
 
-export function buildSpace(proprio: string[] = PROPRIO): Space {
-  const inMotor = (i: number) => MOTOR.includes(fitClass(connectome.cells[i]!));
+export function buildSpace(proprio: string[] = PROPRIO, task: Task = 'gait'): Space {
+  const circuit = CIRCUIT[task];
+  const inMotor = (i: number) => circuit.includes(fitClass(connectome.cells[i]!));
   const chem = new Map<string, number>();
   for (const e of connectome.chemical) {
     if (!inMotor(e.pre) || !inMotor(e.post)) continue;
@@ -64,14 +75,14 @@ export function buildSpace(proprio: string[] = PROPRIO): Space {
     w('chem:small'),
     ...gapKeys.map((k) => w(`gap:${k}`)),
     w('gap:small'),
-    ...MOTOR.filter((c) => c !== 'BWM').map((c) => ({ name: `bias:${c}`, centre: 0, scale: 0.3, lo: -3, hi: 3 })),
+    ...circuit.filter((c) => c !== 'BWM').map((c) => ({ name: `bias:${c}`, centre: 0, scale: 0.3, lo: -3, hi: 3 })),
     ...proprio.flatMap((c) => [
       { name: `gain:${c}`, centre: c === 'DB' || c === 'VB' ? -3 : 0, scale: 2, lo: -30, hi: 30 },
       { name: `offset:${c}`, centre: -0.15, scale: 0.1, lo: -0.5, hi: 0.5 },
       { name: `extent:${c}`, centre: 0.15, scale: 0.1, lo: 0, hi: 0.6 },
     ]),
   ];
-  return { dims, chemKeys, gapKeys, smallChem, smallGap, proprio };
+  return { dims, chemKeys, gapKeys, smallChem, smallGap, proprio, task };
 }
 
 /** Parameter value of dimension d for search coordinate x (unit-scaled, clamped to the range). */
@@ -86,7 +97,7 @@ export function toFit(space: Space, x: ArrayLike<number>, name: string): Fit {
   for (const k of space.smallChem) fit.chem[k] = v.get('chem:small')!;
   for (const k of space.gapKeys) fit.gap[k] = v.get(`gap:${k}`)!;
   for (const k of space.smallGap) fit.gap[k] = v.get('gap:small')!;
-  for (const c of MOTOR) if (c !== 'BWM') fit.bias[c] = v.get(`bias:${c}`)!;
+  for (const c of CIRCUIT[space.task]) if (c !== 'BWM') fit.bias[c] = v.get(`bias:${c}`)!;
   for (const c of space.proprio) {
     fit.proprio.push({ cls: c, gain: v.get(`gain:${c}`)!, offset: v.get(`offset:${c}`)!, extent: v.get(`extent:${c}`)! });
   }

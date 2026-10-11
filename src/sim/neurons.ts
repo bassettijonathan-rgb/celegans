@@ -99,12 +99,17 @@ export interface Network {
 
 /**
  * Builds the network of all 302 neurons and 95 muscle cells from the
- * connectome, with strengths scaled and tonic currents set by a fit
- * (DESIGN.md section 7.1).
+ * connectome, with strengths scaled and tonic conductances set by a fit
+ * (DESIGN.md section 7.1). Ablated cells (laser ablation, Chalfie et al.
+ * 1985) lose every synapse and gap junction, in and out, and their tonic drive.
  */
-export function buildNetwork(params: NeuronParams = DEFAULT_PARAMS, fit: Fit = UNFITTED): Network {
+export function buildNetwork(params: NeuronParams = DEFAULT_PARAMS, fit: Fit = UNFITTED, ablated: readonly number[] = []): Network {
   const n = connectome.cells.length;
-  const { chemical, gap, sectionsPerSynapse } = connectome;
+  const { sectionsPerSynapse } = connectome;
+  const dead = new Uint8Array(n);
+  for (const i of ablated) dead[i] = 1;
+  const chemical = connectome.chemical.filter((e) => !dead[e.pre] && !dead[e.post]);
+  const gap = connectome.gap.filter((e) => !dead[e.a] && !dead[e.b]);
   const net = networkFromEdges(
     n,
     chemical.map((e) => ({
@@ -117,6 +122,10 @@ export function buildNetwork(params: NeuronParams = DEFAULT_PARAMS, fit: Fit = U
     params,
   );
   net.bias.set(biasConductances(fit));
+  for (const i of ablated) net.bias[i] = 0;
+  // A cell's release threshold is its own property: keep the intact worm's,
+  // so ablating one cell does not quietly retune its neighbours.
+  if (ablated.length > 0) net.vTh.set(buildNetwork(params, fit).vTh);
   return net;
 }
 

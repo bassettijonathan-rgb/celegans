@@ -5,6 +5,7 @@
 import { GaitRecorder, type Gait } from '../../src/sim/gait';
 import type { Fit } from '../../src/sim/fit';
 import { buildBrain, createWorld, setMedium, step, type Brain } from '../../src/sim/world';
+import { settleWithGait, touchFrom, type TouchResult } from './touchTrial';
 
 /**
  * Targets from DESIGN.md section 9 (V1a, V1b), Fang-Yen et al. 2010 ≈:
@@ -61,4 +62,46 @@ export function score(fit: Fit, seed = 1): Score {
   const agar = gaitIn(b, TARGETS.agar.mix, seed, 2000, 6000);
   const water = gaitIn(b, TARGETS.water.mix, seed, 1000, 2000);
   return { cost: gaitCost(agar, TARGETS.agar) + gaitCost(water, TARGETS.water), agar, water };
+}
+
+/**
+ * Touch targets (DESIGN.md section 9, all F): V2a, an anterior touch makes
+ * the worm back up within a second (Chalfie et al. 1985 ≈); V2b, a posterior
+ * touch makes it go forward at least as fast (Chalfie 1985 ≈); V4a, AVA is up
+ * and AVB down while it backs up (Kato et al. 2015 ≈); and it crawls forward
+ * again a few seconds later. The ablations (V2d) are held out.
+ */
+export const TOUCH_AT = { anterior: 0.15, posterior: 0.85 } as const;
+/** How fast the fit asks the worm to back up, mm/s (guess, about half its forward speed). */
+export const TARGET_REVERSE = 0.08;
+
+export function touchCost(a: TouchResult & { minSpeed: number; recovered: number }, p: TouchResult & { recovered: number }): number {
+  let c = 0;
+  // V2a: back up, at least TARGET_REVERSE at the fastest.
+  if (a.minSpeed > -TARGET_REVERSE) c += 4 * ((a.minSpeed + TARGET_REVERSE) / TARGET_REVERSE) ** 2;
+  // V4a: AVA up and AVB down after the anterior touch (per 5 mV short).
+  c += Math.max(0, (a.avaBefore + 5 - a.avaAfter) / 5) ** 2;
+  c += Math.max(0, (a.avbAfter - (a.avbBefore - 5)) / 5) ** 2;
+  // Forward again by the end.
+  c += Math.max(0, (0.05 - a.recovered) / 0.05) ** 2;
+  // V2b: posterior touch, no slower than before, and never backwards.
+  c += Math.max(0, (p.before - p.after) / Math.max(0.05, p.before)) ** 2;
+  c += Math.max(0, (0.05 - p.recovered) / 0.05) ** 2;
+  return c;
+}
+
+export interface TouchScore extends Score {
+  anterior: TouchResult & { minSpeed: number; recovered: number };
+  posterior: TouchResult & { recovered: number };
+}
+
+export function scoreTouch(fit: Fit, seed = 1): TouchScore {
+  const b = buildBrain(fit);
+  const s = settleWithGait(b, seed, 2000, 6000);
+  const agar = s.gait;
+  const water = gaitIn(b, TARGETS.water.mix, seed, 1000, 2000);
+  const anterior = touchFrom(s, b, TOUCH_AT.anterior);
+  const posterior = touchFrom(s, b, TOUCH_AT.posterior);
+  const cost = gaitCost(agar, TARGETS.agar) + gaitCost(water, TARGETS.water) + touchCost(anterior, posterior);
+  return { cost, agar, water, anterior, posterior };
 }

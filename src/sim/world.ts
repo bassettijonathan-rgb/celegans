@@ -17,6 +17,7 @@ import { DEFAULT_PARAMS, buildNetwork, createNeuronState, stepNeurons, type Netw
 import { Medium, PLATE_RADIUS } from './plate';
 import { createPuppet, drivePuppet, puppetGait, type Puppet } from './puppet';
 import { Purpose, Rng } from './rng';
+import { senseTouch, TOUCH_MS, type Touch } from './touch';
 
 export interface World {
   seed: number;
@@ -36,6 +37,10 @@ export interface World {
    */
   muscles: Float64Array;
   puppet: Puppet;
+  /** The eyelash touch in progress, if any (DESIGN.md section 8.2). */
+  touch: Touch | null;
+  /** Cells killed by laser ablation, sorted; the brain must be built with the same list. */
+  ablated: number[];
 }
 
 /**
@@ -44,12 +49,29 @@ export interface World {
  */
 export interface Brain {
   fit: Fit;
+  /** Ablated cells, sorted. */
+  ablated: number[];
   net: Network;
   proprio: ProprioMap;
 }
 
-export function buildBrain(fit: Fit): Brain {
-  return { fit, net: buildNetwork(DEFAULT_PARAMS, fit), proprio: buildProprioception(fit.proprio) };
+export function buildBrain(fit: Fit, ablated: readonly number[] = []): Brain {
+  const dead = [...new Set(ablated)].sort((a, b) => a - b);
+  const proprio = buildProprioception(fit.proprio);
+  // Dead cells sense nothing.
+  const keep = proprio.cell.reduce<number[]>((k, c, i) => (dead.includes(c) ? k : [...k, i]), []);
+  return {
+    fit,
+    ablated: dead,
+    net: buildNetwork(DEFAULT_PARAMS, fit, dead),
+    proprio: {
+      cell: Int32Array.from(keep, (i) => proprio.cell[i]!),
+      side: Float64Array.from(keep, (i) => proprio.side[i]!),
+      from: Int32Array.from(keep, (i) => proprio.from[i]!),
+      to: Int32Array.from(keep, (i) => proprio.to[i]!),
+      gain: Float64Array.from(keep, (i) => proprio.gain[i]!),
+    },
+  };
 }
 
 /** The brain the app uses; built once and shared. */
@@ -80,6 +102,8 @@ export function createWorld(seed: number, b: Brain = brain()): World {
     neurons: createNeuronState(b.net),
     muscles: new Float64Array(MUSCLE_COUNT).fill(0.5),
     puppet: createPuppet(1),
+    touch: null,
+    ablated: [...b.ablated],
   };
 }
 
@@ -91,8 +115,14 @@ const turning = new Float64Array(NODES);
 /** Advances the world by one step (1 ms of worm time). */
 export function step(world: World, b: Brain = brain()): void {
   const net = b.net;
+  if (world.ablated.length !== b.ablated.length || world.ablated.some((c, i) => c !== b.ablated[i])) {
+    throw new Error('the brain was built for different ablations than the world has');
+  }
   turningAngles(world.body.x, world.body.y, turning);
   senseProprioception(b.proprio, turning, world.neurons.sense!);
+  senseTouch(world.touch, world.step, world.neurons.sense!);
+  for (const c of world.ablated) world.neurons.sense![c] = 0;
+  if (world.touch && world.step >= world.touch.until) world.touch = null;
   if (net.params.noise > 0) {
     const rng = Rng.fromState(world.rng);
     stepNeurons(net, world.neurons, 1, rng);
@@ -130,4 +160,24 @@ export function setInjection(world: World, neuron: number, pA: number): void {
   if (!Number.isInteger(neuron) || neuron < 0 || neuron >= NEURON_COUNT) throw new Error(`No neuron ${neuron}`);
   if (!Number.isFinite(pA)) throw new Error(`Bad current ${pA}`);
   world.neurons.inject[neuron] = pA;
+}
+
+/**
+ * Lab bench: stroke the body with an eyelash at body fraction `at` (0 nose,
+ * 1 tail). The touch receptors under that point open for TOUCH_MS.
+ */
+export function touchBody(world: World, at: number): void {
+  if (!Number.isFinite(at) || at < 0 || at > 1) throw new Error(`Bad touch point ${at}`);
+  world.touch = { at, until: world.step + TOUCH_MS };
+}
+
+/**
+ * Lab bench: kill cells by laser (or bring them back). Returns the new sorted
+ * list; build the brain again with it (`buildBrain(fit, world.ablated)`).
+ * A killed cell keeps a voltage but has no synapses, gap junctions or senses.
+ */
+export function setAblated(world: World, cells: readonly number[]): number[] {
+  for (const c of cells) if (!Number.isInteger(c) || c < 0 || c >= NEURON_COUNT) throw new Error(`No neuron ${c}`);
+  world.ablated = [...new Set(cells)].sort((a, b) => a - b);
+  return world.ablated;
 }

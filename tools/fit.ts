@@ -6,6 +6,7 @@
  *   npm run fit -- --seed 1 --generations 200 [--workers 4] [--out dir]
  *     [--from fit.json --sigma 0.3 --name gait-3b]   continue from a saved fit
  *     [--proprio DB,VB,SMD]   which classes get fitted stretch feedback (default all in space.ts)
+ *     [--task touch]   also fit the touch responses (V2a, V2b, V4a) over the touch circuit
  *
  * Deterministic for a given seed and worker count does not matter: each
  * candidate is scored independently.
@@ -13,9 +14,9 @@
 import { Worker } from 'node:worker_threads';
 import { mkdirSync, readFileSync, writeFileSync, appendFileSync } from 'node:fs';
 import { Purpose, Rng } from '../src/sim/rng';
-import { buildSpace, fromFit, toFit } from './fit/space';
+import { buildSpace, fromFit, toFit, type Task } from './fit/space';
 import type { Fit } from '../src/sim/fit';
-import type { Score } from './fit/evaluate';
+import type { Score, TouchScore } from './fit/evaluate';
 
 const args = process.argv.slice(2);
 const opt = (name: string, dflt: number) => {
@@ -30,7 +31,9 @@ const out = outIdx >= 0 ? args[outIdx + 1]! : 'fits';
 mkdirSync(out, { recursive: true });
 
 const proprioIdx = args.indexOf('--proprio');
-const space = buildSpace(proprioIdx >= 0 ? args[proprioIdx + 1]!.split(',') : undefined);
+const taskIdx = args.indexOf('--task');
+const task: Task = taskIdx >= 0 && args[taskIdx + 1] === 'touch' ? 'touch' : 'gait';
+const space = buildSpace(proprioIdx >= 0 ? args[proprioIdx + 1]!.split(',') : undefined, task);
 const n = space.dims.length;
 const rng = new Rng(seed, Purpose.sim);
 
@@ -64,7 +67,7 @@ function evaluate(xs: Float64Array[]): Promise<(Score & { error?: string })[]> {
     const feed = (w: Worker) => {
       if (next >= xs.length) return;
       const id = next++;
-      w.postMessage({ id, x: [...xs[id]!], seed: 1, proprio: space.proprio });
+      w.postMessage({ id, x: [...xs[id]!], seed: 1, proprio: space.proprio, task });
     };
     for (const w of pool) {
       w.removeAllListeners('message');
@@ -82,10 +85,13 @@ function evaluate(xs: Float64Array[]): Promise<(Score & { error?: string })[]> {
 const nameIdx = args.indexOf('--name');
 const runName = nameIdx >= 0 ? args[nameIdx + 1]! : `gait-${seed}`;
 const log = `${out}/${runName}.log`;
-writeFileSync(log, `gait fit seed ${seed}, ${n} dims, lambda ${lambda}, stretch feedback in ${space.proprio.join(' ')}\n`);
+writeFileSync(log, `${task} fit seed ${seed}, ${n} dims, lambda ${lambda}, stretch feedback in ${space.proprio.join(' ')}\n`);
 let best = { cost: Infinity, x: new Float64Array(n), score: undefined as Score | undefined };
 const fmt = (g: Score['agar']) =>
   `${g.frequency.toFixed(2)} Hz λ ${g.wavelength.toFixed(2)} κL ${g.amplitude.toFixed(1)} v ${g.speed.toFixed(3)} coh ${g.coherence.toFixed(2)}`;
+
+const fmtTouch = (t: TouchScore) =>
+  `front min ${t.anterior.minSpeed.toFixed(3)} AVA ${(t.anterior.avaAfter - t.anterior.avaBefore).toFixed(1)} AVB ${(t.anterior.avbAfter - t.anterior.avbBefore).toFixed(1)} end ${t.anterior.recovered.toFixed(3)}; back ${t.posterior.before.toFixed(3)}→${t.posterior.after.toFixed(3)}`;
 
 for (let gen = 0; gen < generations; gen++) {
   const zs: Float64Array[] = [];
@@ -102,18 +108,22 @@ for (let gen = 0; gen < generations; gen++) {
     best = { cost: topCost, x: Float64Array.from(xs[top]!), score: scores[top] };
     const fit = toFit(space, best.x, runName);
     fit.meta = {
-      fittedTo: 'V1a crawling + V1b swimming gait (DESIGN.md 7.2); V1c held out',
+      fittedTo:
+        task === 'touch'
+          ? 'V1a, V1b gait + V2a, V2b touch responses + V4a command interneurons (DESIGN.md 7.2); V1c and ablations (V2d) held out'
+          : 'V1a crawling + V1b swimming gait (DESIGN.md 7.2); V1c held out',
       cost: topCost,
       seed,
       ...(fromIdx >= 0 ? { continuedFrom: args[fromIdx + 1]!.split('/').pop() ?? '' } : {}),
       generation: gen,
       agar: fmt(best.score!.agar),
       water: fmt(best.score!.water),
+      ...(task === 'touch' ? { touch: fmtTouch(best.score as TouchScore) } : {}),
     };
     writeFileSync(`${out}/${runName}.json`, JSON.stringify(fit, null, 1) + '\n');
   }
   const s = scores[top]!;
-  appendFileSync(log, `gen ${gen} best ${topCost.toFixed(3)} (ever ${best.cost.toFixed(3)}) σ ${sigma.toFixed(3)} | agar ${fmt(s.agar)} | water ${fmt(s.water)}${s.error ? ' ERR ' + s.error : ''}\n`);
+  appendFileSync(log, `gen ${gen} best ${topCost.toFixed(3)} (ever ${best.cost.toFixed(3)}) σ ${sigma.toFixed(3)} | agar ${fmt(s.agar)} | water ${fmt(s.water)}${task === 'touch' && !s.error ? ' | ' + fmtTouch(s as TouchScore) : ''}${s.error ? ' ERR ' + s.error : ''}\n`);
 
   // Update (sep-CMA-ES).
   const old = mean;
