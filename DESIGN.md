@@ -533,6 +533,28 @@ any later fit that passes it is weaker evidence than a first look. Tools: `npm r
 <fit.json>` (V1c), `npm run rhythm` (V5); tests in `tests/science/gait.test.ts`, where V1c is
 marked as a known failure.
 
+### 9.2 Findings so far: M4 (touch and reversals; no fit shipped yet)
+
+- **The M3b fit's strengths are implausible.** It scaled the motor circuit until AVA had about
+  1,000 nS of resting input conductance (every chemical synapse half open, plus gap junctions).
+  Real C. elegans neurons are around 1 nS (GΩ input resistance; Goodman et al. 1998 ≈); the
+  unfitted wiring ranges 0.1–39 nS. So clamped, 200 pA into AVA moved it 0.15 mV. Fits now pay a
+  penalty for any neuron above 39 nS (`conductanceCost` in `tools/fit/evaluate.ts`).
+- **Hubs drown the touch pathway.** A head touch depolarises ALM and AVM by 12–19 mV, but with
+  every synapse at the same default strength AVD moves 0.1 mV: its hundreds of other inputs
+  outweigh the few from the touch cells. The touch and steer fits therefore scale each command
+  interneuron's inputs from outside the circuit as a group (`COMMAND` in `tools/fit/space.ts`).
+- **The fitted rhythm ignores the command cells.** In the M3b fit, driving AVA with 200 pA and
+  holding AVB 17 mV down leaves the gait unchanged: the rhythm runs through A-cell stretch
+  feedback (V5), so the forward/backward switch has nothing to act on. Real worms switch there:
+  AVB drives forward through the B cells, AVA backward through the A cells.
+- **Under the cap, steering and gait trade off.** A fit asking for forward crawling and swimming
+  plus backing up while AVA is lit (optogenetics; Guo et al. 2009 ≈, Kawano et al. 2011 ≈) found,
+  at best: backing up at 0.05 mm/s (target 0.08) and crawling forward again after the light, but
+  crawling at only 0.2 Hz and 0.015 mm/s and swimming at 1.3 Hz. No generation in the next 100
+  improved on that; later ones either steered or crawled, not both.
+- **What works:** a tail touch speeds the worm up (0.04 → 0.12 mm/s, V2b) in the capped touch fit.
+
 Honest expectations: V1 and V2 should pass. V3b and V4b are the hardest; V4b may come out only
 modestly above baseline, and that would be a real finding about connectome-only models, reported
 as such rather than tuned away.
