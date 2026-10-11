@@ -4,13 +4,15 @@
  * steps to run per real interval.
  */
 import { STEPS_PER_SECOND } from '../sim/time';
-import { appBrain } from '../sim/fits';
-import { createWorld, setInjection, setMedium, setPuppet, step, type World } from '../sim/world';
+import { GAIT_FIT, appBrain } from '../sim/fits';
+import { buildBrain, createWorld, setAblated, setInjection, setMedium, setPuppet, step, touchBody, type Brain, type World } from '../sim/world';
 import type { FromWorker, ToWorker } from './protocol';
 
 const INTERVAL_MS = 50;
 
 let world: World | undefined;
+/** The brain for the current ablations; the intact one is shared. */
+let brain: Brain = appBrain();
 let speed = 1;
 let owed = 0;
 
@@ -24,7 +26,8 @@ function sendTick(w: World): void {
   const v = Float32Array.from(w.neurons.v);
   const inject = Float32Array.from(w.neurons.inject);
   const muscles = Float32Array.from(w.muscles);
-  post({ type: 'tick', step: w.step, x, y, v, inject, muscles, mix: w.mix, puppet: w.puppet.on }, [
+  const touch = w.touch ? w.touch.at : -1;
+  post({ type: 'tick', step: w.step, x, y, v, inject, muscles, mix: w.mix, puppet: w.puppet.on, ablated: [...w.ablated], touch }, [
     x.buffer,
     y.buffer,
     v.buffer,
@@ -36,7 +39,8 @@ function sendTick(w: World): void {
 onmessage = (e: MessageEvent<ToWorker>) => {
   const msg = e.data;
   if (msg.type === 'start') {
-    world = createWorld(msg.seed, appBrain());
+    brain = appBrain();
+    world = createWorld(msg.seed, brain);
     owed = 0;
     post({ type: 'plate', radius: world.plateRadius, medium: world.medium, rest: world.neurons.v.slice() });
     sendTick(world);
@@ -54,6 +58,13 @@ onmessage = (e: MessageEvent<ToWorker>) => {
   } else if (world && msg.type === 'puppet') {
     setPuppet(world, msg.on);
     sendTick(world);
+  } else if (world && msg.type === 'touch') {
+    touchBody(world, msg.at);
+    sendTick(world);
+  } else if (world && msg.type === 'ablate') {
+    const cells = setAblated(world, msg.cells);
+    brain = cells.length ? buildBrain(GAIT_FIT, cells) : appBrain();
+    sendTick(world);
   }
 };
 
@@ -61,7 +72,7 @@ setInterval(() => {
   if (!world || speed <= 0) return;
   owed += (speed * STEPS_PER_SECOND * INTERVAL_MS) / 1000;
   while (owed >= 1) {
-    step(world, appBrain());
+    step(world, brain);
     owed -= 1;
   }
   sendTick(world);

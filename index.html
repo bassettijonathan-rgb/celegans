@@ -53,7 +53,8 @@
           <span id="medium-label"></span>
           <button id="follow" aria-pressed="true">Follow</button>
         </div>
-        <p class="legend">Red bands: muscles pulling on that side (dorsal on the left of the direction of travel).</p>
+        <p class="legend">Red bands: muscles pulling on that side (dorsal on the left of the direction of travel).
+          Click the worm to touch it with an eyelash: near the head it should back up, near the tail speed up.</p>
       </div>
       <div id="bench" hidden>
         <p id="info">Click a neuron to see it and its connections.</p>
@@ -63,6 +64,12 @@
           <input id="amp" type="range" min="5" max="200" step="5" value="50" aria-label="Current" />
           <span id="amp-label"></span>
           <button id="clear">Stop all</button>
+        </div>
+        <div class="row">
+          <button id="kill" disabled>Kill (laser)</button>
+          <button id="kill-class" disabled>Kill class</button>
+          <button id="revive">Revive all</button>
+          <span id="killed"></span>
         </div>
         <p class="legend">Colour: voltage change from rest (<span style="color:#468ceb">down</span> ·
           <span style="color:#f4a63c">up</span>). Lines: <span style="color:#5fbf72">excitatory</span> ·
