@@ -2,7 +2,7 @@
  * The worm's body as a 2D rod seen from above, lying on its side
  * (DESIGN.md section 6.1). Lengths are in µm.
  *
- * M0 only places the body; the overdamped mechanics arrive in M2.
+ * The overdamped mechanics that move it are in mechanics.ts.
  */
 import type { Rng } from './rng';
 

@@ -17,7 +17,7 @@ model, and update DESIGN.md in the same pull request when a model changes.
 
 ## Layout
 
-- `src/sim/`: the simulation (body, plate, connectome, neurons; later muscles), seeded RNG, state hash. Pure and deterministic.
+- `src/sim/`: the simulation (body and its mechanics, muscles, plate, connectome, neurons), seeded RNG, state hash. Pure and deterministic.
 - `src/data/`: generated data (the connectome). `tools/data/`: the scripts that generate it.
 - `src/worker/`: runs the simulation in a Web Worker and posts snapshots.
 - `src/render/`: PixiJS drawing. Reads snapshots only; never changes simulation state.

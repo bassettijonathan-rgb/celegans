@@ -1,7 +1,9 @@
 /**
  * Starts the page: PixiJS views of the plate and of the brain, fed by the
  * simulation worker. URL options: ?seed=N picks the plate (default 1);
- * ?stim=AVML,PLML starts with those neurons stimulated (the first selected).
+ * ?stim=AVML,PLML starts with those neurons stimulated (the first selected);
+ * ?view=brain opens the brain view; ?medium=0..1 sets water (0) to agar (1);
+ * ?puppet=0 starts with the puppet drive off.
  */
 import { Application } from 'pixi.js';
 import { BrainView } from './render/brainView';
@@ -18,7 +20,8 @@ async function start(): Promise<void> {
   const status = document.getElementById('status')!;
   const hud = document.getElementById('hud')!;
   const info = document.getElementById('info')!;
-  const seed = parseSeed(new URLSearchParams(location.search).get('seed'));
+  const params = new URLSearchParams(location.search);
+  const seed = parseSeed(params.get('seed'));
 
   const app = new Application();
   await app.init({ resizeTo: stage, background: 0x111317, antialias: true, autoDensity: true, resolution: devicePixelRatio });
@@ -31,7 +34,11 @@ async function start(): Promise<void> {
   const cameras = { plate: new Camera(plate.root, stage), brain: new Camera(brain.root, stage) };
   const top = () => hud.getBoundingClientRect().bottom;
 
-  let mode: Mode = 'brain';
+  let mode: Mode = params.get('view') === 'brain' ? 'brain' : 'plate';
+  let follow = true;
+  let radius = 0;
+  let speed = 0;
+  let lastCentre: { x: number; y: number; step: number } | undefined;
   let last: Extract<FromWorker, { type: 'tick' }> | undefined;
   let rest: Float64Array | undefined;
   let framed = false;
@@ -45,6 +52,7 @@ async function start(): Promise<void> {
       document.getElementById(`mode-${k}`)!.setAttribute('aria-pressed', String(k === m));
     }
     document.getElementById('bench')!.hidden = m !== 'brain';
+    document.getElementById('plate-bench')!.hidden = m !== 'plate';
     if (m === 'brain') cameras.brain.fit(brain.bounds, top());
     else findWorm();
   };
@@ -72,6 +80,28 @@ async function start(): Promise<void> {
     send({ type: 'inject', neuron: brain.selected, pA: on ? 0 : Number(amp.value) });
   });
   document.getElementById('clear')!.addEventListener('click', () => send({ type: 'clear-injections' }));
+
+  // Lab bench, plate side: the puppet drive, the medium and the camera.
+  const puppet = document.getElementById('puppet') as HTMLButtonElement;
+  const medium = document.getElementById('medium') as HTMLInputElement;
+  const mediumLabel = document.getElementById('medium-label')!;
+  const followButton = document.getElementById('follow') as HTMLButtonElement;
+  const showMedium = () => {
+    const m = Number(medium.value) / 100;
+    mediumLabel.textContent = m === 0 || m === 1 ? '' : `(${Math.round(m * 100)}%)`;
+  };
+  const startMix = Number(params.get('medium') ?? '1');
+  medium.value = String(Math.round(100 * (Number.isFinite(startMix) ? Math.min(1, Math.max(0, startMix)) : 1)));
+  showMedium();
+  medium.addEventListener('input', () => {
+    showMedium();
+    send({ type: 'medium', mix: Number(medium.value) / 100 });
+  });
+  puppet.addEventListener('click', () => send({ type: 'puppet', on: !(last?.puppet ?? false) }));
+  followButton.addEventListener('click', () => {
+    follow = !follow;
+    followButton.setAttribute('aria-pressed', String(follow));
+  });
 
   // A click (not a drag) on the brain picks the nearest neuron.
   let down: { x: number; y: number } | undefined;
@@ -113,12 +143,23 @@ async function start(): Promise<void> {
   worker.onmessage = (e: MessageEvent<FromWorker>) => {
     const msg = e.data;
     if (msg.type === 'plate') {
-      plate.setPlate(msg.radius, msg.medium);
+      radius = msg.radius;
       rest = msg.rest;
     } else if (msg.type === 'tick') {
       last = msg;
-      plate.setWorm(msg.x, msg.y);
-      status.textContent = `Plate ${seed} · worm time ${formatWormTime(msg.step)}`;
+      plate.setPlate(radius, msg.mix);
+      plate.setWorm(msg.x, msg.y, msg.muscles);
+      const c = centre(msg.x, msg.y);
+      if (lastCentre && msg.step > lastCentre.step) {
+        // µm per ms is mm per s; smoothed over about a second of worm time.
+        const v = Math.hypot(c.x - lastCentre.x, c.y - lastCentre.y) / (msg.step - lastCentre.step);
+        const k = Math.min(1, (msg.step - lastCentre.step) / 1000);
+        speed += (v - speed) * k;
+      }
+      lastCentre = { ...c, step: msg.step };
+      if (follow && mode === 'plate' && framed) cameras.plate.centreOn(c.x, c.y, top());
+      puppet.textContent = msg.puppet ? 'Stop puppet' : 'Start puppet';
+      status.textContent = `Plate ${seed} · worm time ${formatWormTime(msg.step)} · ${speed.toFixed(2)} mm/s`;
       render();
       if (!framed) {
         framed = true;
@@ -127,7 +168,9 @@ async function start(): Promise<void> {
     }
   };
   send({ type: 'start', seed });
-  const stimNames = (new URLSearchParams(location.search).get('stim') ?? '').split(',').filter(Boolean);
+  send({ type: 'medium', mix: Number(medium.value) / 100 });
+  if (params.get('puppet') !== '0') send({ type: 'puppet', on: true });
+  const stimNames = (params.get('stim') ?? '').split(',').filter(Boolean);
   for (const name of stimNames) {
     try {
       const i = cellIndex(name.trim().toUpperCase());
@@ -148,6 +191,16 @@ async function start(): Promise<void> {
       for (const b of speedButtons) b.setAttribute('aria-pressed', String(b === button));
     });
   }
+}
+
+function centre(x: Float64Array, y: Float64Array): { x: number; y: number } {
+  let sx = 0;
+  let sy = 0;
+  for (let i = 0; i < x.length; i++) {
+    sx += x[i]!;
+    sy += y[i]!;
+  }
+  return { x: sx / x.length, y: sy / y.length };
 }
 
 function parseSeed(raw: string | null): number {

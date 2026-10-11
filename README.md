@@ -5,7 +5,8 @@ the measured connectome, driving a soft body that crawls on agar and swims in wa
 its behaviour is scripted; it has to come out of the cells, the wiring and the physics, and it is
 checked against real experiments.
 
-Play: https://bassettijonathan-rgb.github.io/celegans/ (`?seed=N` picks a plate)
+Play: https://bassettijonathan-rgb.github.io/celegans/ (`?seed=N` picks a plate, `?medium=0` puts it in water,
+`?view=brain` opens the brain view)
 
 See [DESIGN.md](DESIGN.md) for the model and the milestone plan.
 
@@ -13,5 +14,5 @@ See [DESIGN.md](DESIGN.md) for the model and the milestone plan.
 npm install
 npm run dev        # in the browser
 npm test           # tests
-npm run sim -- --seed 42 --seconds 10   # headless run
+npm run sim -- --seed 42 --seconds 10 [--puppet] [--medium 0..1]   # headless run
 ```
