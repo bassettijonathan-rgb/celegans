@@ -6,5 +6,7 @@ export default defineConfig({
   worker: { format: 'es' },
   test: {
     include: ['tests/**/*.test.ts'],
+    // Physics and gait tests run seconds of worm time; CI runners are slower than a laptop.
+    testTimeout: 30_000,
   },
 });

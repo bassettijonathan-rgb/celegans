@@ -235,6 +235,17 @@ Sensory neurons receive a stimulus current from their receptor model (section 8)
 (B and A motor neurons, SMD, DVA among others) is a current proportional to local body curvature at
 the cell's position, sign and gain fitted.
 
+As built in M3a (`src/sim/motor.ts`): DB, VB, DA, VA and SMD each get `gain · side · κL`, read at
+the soma's position along the body plus a per-class offset (positive is towards the tail). Side is
++1 for dorsal cells and −1 for ventral, so a positive gain excites a cell when its own side is
+bent concave. A soma's position along the body comes from its VirtualWorm coordinate, scaled so the
+nose and tail tips sit 25 and 30 µm beyond the first and last somata. Gains are 0 and offsets 0
+until M3b fits them; Wen et al. 2012 ≈ is the evidence that B cells sense bending next to them,
+and the fit decides on which side. Each class reads the mean curvature over a receptive field
+(offset and length fitted): Boyle, Berri & Cohen 2012 gave each B unit a field reaching about half a
+body length behind it. DVA is left out for now: its single long process runs the length
+of the body, so it needs a receptive field rather than a point.
+
 ---
 
 ## 5. The motor system
@@ -335,7 +346,9 @@ The plate has a wall (edge of the dish); worms in water need no ground.
 
 As built in M2: water `c_t = 3.3e-3`, `c_n = 5.2e-3` Pa·s (K ≈ 1.6); agar `c_t = 3.2`,
 `c_n = 128` Pa·s (K = 40), the values used by Boyle, Berri & Cohen 2012 ≈ after Niebur & Erdős
-1991. Both still marked ≈ until checked against the papers. The slider interpolates both
+1991. Checked: these are exactly the constants in Boyle, Berri & Cohen's published model code
+(github.com/openworm/CelegansNeuromechanicalGaitModulation, `worm.cc`, after dividing out their
+per-node split); the original papers themselves are not reachable from the build environment. The slider interpolates both
 coefficients in log space. The wall is a stiff spring at the dish edge. Tests:
 
 - Same drag in every direction: the worm goes nowhere (to 1e-9 µm/ms).
@@ -365,8 +378,18 @@ coefficients in log space. The wall is a stiff spring at the dish edge. Tests:
   by the D-type cross inhibition, as in the worm.
 
 As built in M2 (`src/sim/muscles.ts`, `src/sim/puppet.ts`): the muscles are **actuators** only.
-Each has an activation from 0 to 1; the voltage and calcium of the cell come with the motor circuit
-in M3.
+Each has an activation from 0 to 1.
+
+As built in M3a: the 95 muscles are cells of the network (`buildNetwork` now holds 397 cells). They
+receive all 956 neuromuscular junctions of Cook 2019 (892 with a measured sign) and their 96
+muscle-to-muscle gap junctions. Their membrane is, for now, the same graded model as the neurons, and
+their "release" is the calcium drive: calcium follows it with a 100 ms time constant (the muscle
+time constant of Boyle, Berri & Cohen 2012, checked in their published code) and is the activation. The calcium action potentials of Gao & Zhen 2011
+replace this with the conductance-based cells. At rest every muscle sits at half activation, so the
+two sides cancel and the body lies straight. With strengths not yet fitted, stimulating each motor
+class already bends the body to the anatomically expected side: DB, DA and AS dorsal; VB and VA
+ventral; GABAergic DD ventral and VD dorsal, by relaxing their own side (tests/motor.test.ts). The
+puppet still overrides the motor neurons when it is on.
 
 - Placement: the 24 positions of each quadrant are spread evenly over 5–95% of the body length (a
   simplification of WormAtlas ≈, not a measured map). Each cell pulls with a hat-shaped weight two
@@ -537,7 +560,12 @@ the worker setup. Its body code does not (D9), and that repo is not changed.
   never gains energy, a reciprocal flap goes nowhere (scallop theorem). *Visible:* a puppet worm
   driven by a prescribed wave, crawling and swimming. *Done:* see the as-built notes in 6.2–6.4.
 - **M3 Locomotion.** Motor circuit wired to the body, proprioception, both rhythm mechanisms,
-  first fits. V1a–c, V5. *Visible:* the worm crawls and swims on its own brain.
+  first fits. V1a–c, V5. *Visible:* the worm crawls and swims on its own brain. Two pull requests:
+  M3a wires muscles and proprioception (done; see 4.4 and 6.4) and adds the fit machinery: a fit is
+  plain JSON of class-pair strengths, tonic currents per class and proprioceptive fields
+  (`src/sim/fit.ts`); `npm run fit` runs separable CMA-ES over the motor circuit (127 numbers)
+  scored on V1a and V1b only; gait is measured from body curvature (`src/sim/gait.ts`). M3b adds
+  the rhythm mechanisms, the fits and their results.
 - **M4 Touch and reversals.** Touch receptors, nose touch, command switch, omega turns, spontaneous
   reversals. V2a–e, V4a. Ablation and optogenetics tools.
 - **M5 Salt chemotaxis.** Salt field, ASE, full fitting ensemble. V3a–c, V4b.

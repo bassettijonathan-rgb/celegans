@@ -1,7 +1,8 @@
 /**
  * Starts the page: PixiJS views of the plate and of the brain, fed by the
  * simulation worker. URL options: ?seed=N picks the plate (default 1);
- * ?stim=AVML,PLML starts with those neurons stimulated (the first selected);
+ * ?stim=AVML,PLML starts with those neurons stimulated (the first selected;
+ * a class name such as VD stimulates the whole class);
  * ?view=brain opens the brain view; ?medium=0..1 sets water (0) to agar (1);
  * ?puppet=0 starts with the puppet drive off.
  */
@@ -9,7 +10,7 @@ import { Application } from 'pixi.js';
 import { BrainView } from './render/brainView';
 import { Camera } from './render/camera';
 import { PlateView, wormBounds } from './render/plateView';
-import { NEURON_COUNT, cellIndex, connectome } from './sim/connectome';
+import { NEURON_COUNT, connectome } from './sim/connectome';
 import { formatWormTime } from './sim/time';
 import type { FromWorker, ToWorker } from './worker/protocol';
 
@@ -80,6 +81,13 @@ async function start(): Promise<void> {
     send({ type: 'inject', neuron: brain.selected, pA: on ? 0 : Number(amp.value) });
   });
   document.getElementById('clear')!.addEventListener('click', () => send({ type: 'clear-injections' }));
+  const stimClass = document.getElementById('stim-class') as HTMLButtonElement;
+  stimClass.addEventListener('click', () => {
+    if (brain.selected < 0 || !last) return;
+    const members = classMembers(connectome.cells[brain.selected]!.class);
+    const on = members.every((i) => last!.inject[i] !== 0);
+    for (const i of members) send({ type: 'inject', neuron: i, pA: on ? 0 : Number(amp.value) });
+  });
 
   // Lab bench, plate side: the puppet drive, the medium and the camera.
   const puppet = document.getElementById('puppet') as HTMLButtonElement;
@@ -120,6 +128,7 @@ async function start(): Promise<void> {
     brain.update(last.v, rest, last.inject);
     const s = brain.selected;
     stim.disabled = s < 0;
+    stimClass.disabled = s < 0;
     if (s < 0) {
       info.innerHTML = 'Click a neuron to see it and its connections.';
       stim.textContent = 'Stimulate';
@@ -138,6 +147,8 @@ async function start(): Promise<void> {
       `In: ${ins.length} synapses (${count(ins, 'predicted')} sign predicted, ${count(ins, 'ambiguous')} unknown) · ` +
       `out: ${outs.length}${nmj ? ` + ${nmj} onto muscle` : ''} · ${gaps} gap junctions`;
     stim.textContent = last.inject[s] !== 0 ? 'Stop stimulating' : 'Stimulate';
+    const members = classMembers(c.class);
+    stimClass.textContent = `${members.every((i) => last!.inject[i] !== 0) ? 'Stop' : 'Stimulate'} all ${c.class} (${members.length})`;
   };
 
   worker.onmessage = (e: MessageEvent<FromWorker>) => {
@@ -171,14 +182,14 @@ async function start(): Promise<void> {
   send({ type: 'medium', mix: Number(medium.value) / 100 });
   if (params.get('puppet') !== '0') send({ type: 'puppet', on: true });
   const stimNames = (params.get('stim') ?? '').split(',').filter(Boolean);
-  for (const name of stimNames) {
-    try {
-      const i = cellIndex(name.trim().toUpperCase());
-      if (i >= NEURON_COUNT) continue;
+  for (const raw of stimNames) {
+    const name = raw.trim().toUpperCase();
+    // A cell name, or else a whole class; unknown names are ignored.
+    const cells = connectome.cells.slice(0, NEURON_COUNT).flatMap((c, i) => (c.name === name ? [i] : []));
+    const members = cells.length ? cells : classMembers(name);
+    for (const i of members) {
       send({ type: 'inject', neuron: i, pA: Number(amp.value) });
       if (brain.selected < 0) brain.selected = i;
-    } catch {
-      // Unknown names in the URL are ignored.
     }
   }
   brain.drawLinks();
@@ -191,6 +202,11 @@ async function start(): Promise<void> {
       for (const b of speedButtons) b.setAttribute('aria-pressed', String(b === button));
     });
   }
+}
+
+/** The neurons of an anatomical class, e.g. all 13 VD cells. */
+function classMembers(cls: string): number[] {
+  return connectome.cells.slice(0, NEURON_COUNT).flatMap((c, i) => (c.class === cls ? [i] : []));
 }
 
 function centre(x: Float64Array, y: Float64Array): { x: number; y: number } {

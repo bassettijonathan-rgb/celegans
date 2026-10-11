@@ -14,9 +14,17 @@
  *
  * The cells known to spike or plateau (AWA, AVL, DVB, RMD; DESIGN.md
  * section 4.3) use this graded model until their conductance-based models
- * arrive in the next pull request.
+ * arrive.
+ *
+ * From M3 the network also holds the 95 body-wall muscle cells (after the
+ * 302 neurons), with the same graded membrane for now: they receive the
+ * neuromuscular junctions and their gap junctions, and their "release" is the
+ * calcium drive that motor.ts turns into contraction. Muscle membranes with
+ * calcium action potentials (Gao & Zhen 2011) replace this when the
+ * conductance-based cells arrive.
  */
-import { NEURON_COUNT, connectome } from './connectome';
+import { connectome } from './connectome';
+import { UNFITTED, biasCurrents, chemScale, gapScale, type Fit } from './fit';
 import type { Rng } from './rng';
 
 /**
@@ -81,20 +89,31 @@ export interface Network {
   gapG: Float64Array;
   /** Release threshold per neuron: its voltage at equilibrium with every synapse half open (Kunert 2014). */
   vTh: Float64Array;
+  /** Tonic current per cell from a fit, pA (0 when unfitted). */
+  bias: Float64Array;
 }
 
-/** Builds the network of all 302 neurons from the connectome. */
-export function buildNetwork(params: NeuronParams = DEFAULT_PARAMS): Network {
-  const n = NEURON_COUNT;
+/**
+ * Builds the network of all 302 neurons and 95 muscle cells from the
+ * connectome, with strengths scaled and tonic currents set by a fit
+ * (DESIGN.md section 7.1).
+ */
+export function buildNetwork(params: NeuronParams = DEFAULT_PARAMS, fit: Fit = UNFITTED): Network {
+  const n = connectome.cells.length;
   const { chemical, gap, sectionsPerSynapse } = connectome;
-  return networkFromEdges(
+  const net = networkFromEdges(
     n,
-    chemical
-      .filter((e) => e.post < n)
-      .map((e) => ({ pre: e.pre, post: e.post, synapses: e.size / sectionsPerSynapse.chemical, sign: e.sign })),
-    gap.filter((e) => e.a < n && e.b < n).map((e) => ({ a: e.a, b: e.b, synapses: e.size / sectionsPerSynapse.gap })),
+    chemical.map((e) => ({
+      pre: e.pre,
+      post: e.post,
+      synapses: (e.size / sectionsPerSynapse.chemical) * chemScale(fit, e.pre, e.post),
+      sign: e.sign,
+    })),
+    gap.map((e) => ({ a: e.a, b: e.b, synapses: (e.size / sectionsPerSynapse.gap) * gapScale(fit, e.a, e.b) })),
     params,
   );
+  net.bias.set(biasCurrents(fit));
+  return net;
 }
 
 /**
@@ -131,7 +150,19 @@ export function networkFromEdges(
   const gapOther = Int32Array.from(pairs, (p) => p[1]);
   const gapG = Float64Array.from(pairs, (p) => p[2]);
 
-  const net: Network = { n, params, synStart, synPre, synG, synE, gapStart, gapOther, gapG, vTh: new Float64Array(n) };
+  const net: Network = {
+    n,
+    params,
+    synStart,
+    synPre,
+    synG,
+    synE,
+    gapStart,
+    gapOther,
+    gapG,
+    vTh: new Float64Array(n),
+    bias: new Float64Array(n),
+  };
 
   // Equilibrium with s = 1/2 everywhere: a linear system in V (no capacitance term).
   const half = new Float64Array(n).fill(0.5);
@@ -147,7 +178,7 @@ function halfDrive(net: Network, i: number): number {
   return b;
 }
 
-/** Graded transmitter release of every neuron at voltages v. */
+/** Graded transmitter release of every cell at voltages v (for a muscle: its calcium drive). */
 export function release(net: Network, v: Float64Array, out: Float64Array): void {
   const beta = net.params.beta;
   for (let j = 0; j < net.n; j++) out[j] = 1 / (1 + Math.exp(-beta * (v[j]! - net.vTh[j]!)));
@@ -155,16 +186,21 @@ export function release(net: Network, v: Float64Array, out: Float64Array): void 
 
 /** The neurons' state: plain data, saved with the world. */
 export interface NeuronState {
-  /** Membrane voltage per neuron, mV. */
+  /** Membrane voltage per cell, mV. */
   v: Float64Array;
-  /** Injected current per neuron, pA (the lab bench's electrode or light). */
+  /** Injected current per cell, pA (the lab bench's electrode or light). */
   inject: Float64Array;
+  /**
+   * Current from the cell's own sensory receptors, pA (proprioception; later
+   * touch and salt), set every step. Optional so small test circuits can leave it out.
+   */
+  sense?: Float64Array;
 }
 
 export function createNeuronState(net: Network): NeuronState {
   // V = V_th everywhere is the network's resting state: every synapse is then
   // half open, which is exactly the equilibrium V_th was solved for.
-  return { v: Float64Array.from(net.vTh), inject: new Float64Array(net.n) };
+  return { v: Float64Array.from(net.vTh), inject: new Float64Array(net.n), sense: new Float64Array(net.n) };
 }
 
 /**
@@ -184,7 +220,8 @@ export function stepNeurons(net: Network, state: NeuronState, dt: number, rng?: 
     for (let i = 0; i < n; i++) noise[i] = noiseScale * rng.normal();
   }
   const rhs = (i: number) => {
-    let b = cdt * v0[i]! + params.gLeak * params.eLeak + state.inject[i]! + noise[i]!;
+    let b =
+      cdt * v0[i]! + params.gLeak * params.eLeak + net.bias[i]! + state.inject[i]! + (state.sense?.[i] ?? 0) + noise[i]!;
     for (let k = net.synStart[i]!; k < net.synStart[i + 1]!; k++) b += net.synG[k]! * s[net.synPre[k]!]! * net.synE[k]!;
     return b;
   };

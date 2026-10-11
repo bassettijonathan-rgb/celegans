@@ -117,12 +117,11 @@ describe('a puppet worm on the plate', () => {
     expect(headwardSpeed(swim, 1)).toBeGreaterThan(50);
   });
 
-  it('relaxes when the puppet stops', () => {
+  it('hands the muscles back to the resting motor circuit when the puppet stops, and comes to rest', () => {
     const w = createWorld(2);
     setPuppet(w, true);
     for (let k = 0; k < 1000; k++) step(w);
     setPuppet(w, false);
-    expect([...w.muscles].every((a) => a === 0)).toBe(true);
     const x = w.body.x.slice();
     for (let k = 0; k < 5000; k++) step(w);
     let moved = 0;
@@ -131,6 +130,8 @@ describe('a puppet worm on the plate', () => {
     for (let i = 0; i < NODES; i++) moved = Math.max(moved, Math.abs(w.body.x[i]! - x2[i]!));
     expect(moved).toBeLessThan(5);
     expect(x).not.toEqual(x2);
+    // At rest every muscle's calcium is back at one half, so the sides cancel.
+    for (const a of w.muscles) expect(a).toBeCloseTo(0.5, 3);
   });
 
   it('stays inside the dish', () => {

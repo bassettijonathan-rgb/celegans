@@ -1,15 +1,19 @@
 /**
  * The world: everything the simulation knows, as plain data (DESIGN.md section 12).
  *
- * M1 added the 302 neurons, wired from the connectome. M2 adds the body's
- * mechanics, the 95 muscles as actuators and the puppet drive; the muscles
- * are not yet driven by the motor neurons (M3).
+ * M1 added the 302 neurons, wired from the connectome. M2 added the body's
+ * mechanics, the 95 muscles as actuators and the puppet drive. M3 makes the
+ * muscles cells of the network: unless the puppet is on, the motor neurons
+ * drive them through the real neuromuscular junctions, and motor neurons
+ * feel the body's bending.
  */
 import { MAX_RADIUS, NODES, restingBody, type Body } from './body';
 import { NEURON_COUNT } from './connectome';
-import { DEFAULT_ROD, RodWorkspace, dragFor, stepRod } from './mechanics';
+import { DEFAULT_ROD, RodWorkspace, dragFor, stepRod, turningAngles } from './mechanics';
+import { UNFITTED, type Fit } from './fit';
+import { buildProprioception, senseProprioception, stepMuscleCalcium, type ProprioMap } from './motor';
 import { MUSCLE_COUNT, activeTurning } from './muscles';
-import { buildNetwork, createNeuronState, stepNeurons, type Network, type NeuronState } from './neurons';
+import { DEFAULT_PARAMS, buildNetwork, createNeuronState, stepNeurons, type Network, type NeuronState } from './neurons';
 import { Medium, PLATE_RADIUS } from './plate';
 import { createPuppet, drivePuppet, puppetGait, type Puppet } from './puppet';
 import { Purpose, Rng } from './rng';
@@ -26,19 +30,41 @@ export interface World {
   plateRadius: number;
   body: Body;
   neurons: NeuronState;
-  /** Activation of each body-wall muscle, 0 to 1, in connectome order (MDL01 first). */
+  /**
+   * Activation (calcium) of each body-wall muscle, 0 to 1, in connectome order
+   * (MDL01 first). At rest both sides sit at one half and cancel.
+   */
   muscles: Float64Array;
   puppet: Puppet;
 }
 
-/** The network for the default parameters; derived from data, so built once and shared. */
-let defaultNetwork: Network | undefined;
-export function network(): Network {
-  defaultNetwork ??= buildNetwork();
-  return defaultNetwork;
+/**
+ * Everything derived from a fit: the network and the proprioceptive map.
+ * Derived data, rebuilt on load; the world stores only which fit it uses.
+ */
+export interface Brain {
+  fit: Fit;
+  net: Network;
+  proprio: ProprioMap;
 }
 
-export function createWorld(seed: number): World {
+export function buildBrain(fit: Fit): Brain {
+  return { fit, net: buildNetwork(DEFAULT_PARAMS, fit), proprio: buildProprioception(fit.proprio) };
+}
+
+/** The brain the app uses; built once and shared. */
+let defaultBrain: Brain | undefined;
+export function brain(): Brain {
+  defaultBrain ??= buildBrain(UNFITTED);
+  return defaultBrain;
+}
+
+/** The default brain's network. */
+export function network(): Network {
+  return brain().net;
+}
+
+export function createWorld(seed: number, b: Brain = brain()): World {
   const rng = new Rng(seed, Purpose.body);
   // Drop the worm somewhere in the middle third of the plate.
   const r = rng.range(0, PLATE_RADIUS / 3);
@@ -51,8 +77,8 @@ export function createWorld(seed: number): World {
     mix: 1,
     plateRadius: PLATE_RADIUS,
     body: restingBody(rng, r * Math.cos(a), r * Math.sin(a)),
-    neurons: createNeuronState(network()),
-    muscles: new Float64Array(MUSCLE_COUNT),
+    neurons: createNeuronState(b.net),
+    muscles: new Float64Array(MUSCLE_COUNT).fill(0.5),
     puppet: createPuppet(1),
   };
 }
@@ -60,10 +86,13 @@ export function createWorld(seed: number): World {
 /** Scratch for the body step; derived each step, never part of the state. */
 const workspace = new RodWorkspace();
 const theta0 = new Float64Array(NODES);
+const turning = new Float64Array(NODES);
 
 /** Advances the world by one step (1 ms of worm time). */
-export function step(world: World): void {
-  const net = network();
+export function step(world: World, b: Brain = brain()): void {
+  const net = b.net;
+  turningAngles(world.body.x, world.body.y, turning);
+  senseProprioception(b.proprio, turning, world.neurons.sense!);
   if (net.params.noise > 0) {
     const rng = Rng.fromState(world.rng);
     stepNeurons(net, world.neurons, 1, rng);
@@ -72,6 +101,7 @@ export function step(world: World): void {
     stepNeurons(net, world.neurons, 1);
   }
   if (world.puppet.on) drivePuppet(world.puppet, world.muscles, 1);
+  else stepMuscleCalcium(net, world.neurons.v, world.muscles, 1);
   activeTurning(world.muscles, theta0);
   stepRod(world.body.x, world.body.y, theta0, dragFor(world.mix), DEFAULT_ROD, 1, workspace, {
     wall: world.plateRadius - MAX_RADIUS,
@@ -90,10 +120,9 @@ export function setMedium(world: World, mix: number): void {
   Object.assign(world.puppet, puppetGait(world.mix));
 }
 
-/** Lab bench: drive the muscles with the puppet wave, or stop it (the muscles relax). */
+/** Lab bench: drive the muscles with the puppet wave, or hand them back to the motor neurons. */
 export function setPuppet(world: World, on: boolean): void {
   world.puppet.on = on;
-  if (!on) world.muscles.fill(0);
 }
 
 /** Lab bench: inject a steady current (pA) into a neuron, as with an electrode; 0 stops it. */
