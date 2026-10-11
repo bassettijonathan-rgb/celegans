@@ -25,6 +25,13 @@ export const PROPRIO = ['DB', 'VB', 'DA', 'VA', 'SMD'];
  */
 export const TOUCH = ['ALM', 'AVM', 'PLM', 'PVM', 'DVA', 'LUA', 'RIM'];
 export type Task = 'gait' | 'touch';
+/**
+ * Command interneurons: hubs with hundreds of inputs from outside the motor
+ * and touch circuits. With every synapse at the same default strength, those
+ * inputs swamp the few from the touch receptors. The touch fit therefore
+ * scales each hub's outside inputs together, one number per hub and kind.
+ */
+export const COMMAND = ['AVA', 'AVB', 'AVD', 'AVE', 'PVC'];
 export const CIRCUIT: Record<Task, string[]> = { gait: MOTOR, touch: [...MOTOR, ...TOUCH] };
 const MIN_SECTIONS = 10;
 
@@ -42,6 +49,9 @@ export interface Space {
   gapKeys: string[];
   smallChem: string[];
   smallGap: string[];
+  /** Per command class: its chemical and gap class pairs from outside the circuit (touch task only). */
+  otherChem: Map<string, string[]>;
+  otherGap: Map<string, string[]>;
   /** Classes whose stretch feedback is fitted; the others have none. */
   proprio: string[];
   /** What is fitted: the gait alone, or the gait and the touch responses. */
@@ -68,6 +78,26 @@ export function buildSpace(proprio: string[] = PROPRIO, task: Task = 'gait'): Sp
   const gapKeys = sorted(gap).filter((k) => gap.get(k)! >= MIN_SECTIONS);
   const smallChem = sorted(chem).filter((k) => chem.get(k)! < MIN_SECTIONS);
   const smallGap = sorted(gap).filter((k) => gap.get(k)! < MIN_SECTIONS);
+  const otherChem = new Map<string, string[]>();
+  const otherGap = new Map<string, string[]>();
+  if (task === 'touch') {
+    const add = (m: Map<string, string[]>, cmd: string, k: string) => {
+      const list = m.get(cmd) ?? [];
+      if (!list.includes(k)) list.push(k);
+      m.set(cmd, list);
+    };
+    for (const e of connectome.chemical) {
+      const post = fitClass(connectome.cells[e.post]!);
+      if (COMMAND.includes(post) && !inMotor(e.pre)) add(otherChem, post, chemKey(e.pre, e.post));
+    }
+    for (const e of connectome.gap) {
+      const a = fitClass(connectome.cells[e.a]!);
+      const b = fitClass(connectome.cells[e.b]!);
+      if (COMMAND.includes(a) && !inMotor(e.b)) add(otherGap, a, gapKey(e.a, e.b));
+      else if (COMMAND.includes(b) && !inMotor(e.a)) add(otherGap, b, gapKey(e.a, e.b));
+    }
+    for (const m of [otherChem, otherGap]) for (const list of m.values()) list.sort();
+  }
   const START_NMJ = 2;
   const w = (name: string): Dim => ({ name, centre: /^chem:(DB|VB|DA|VA|DD|VD|AS)>BWM$/.test(name) ? START_NMJ : 0, scale: 0.5, lo: -2, hi: 3 });
   const dims: Dim[] = [
@@ -75,6 +105,8 @@ export function buildSpace(proprio: string[] = PROPRIO, task: Task = 'gait'): Sp
     w('chem:small'),
     ...gapKeys.map((k) => w(`gap:${k}`)),
     w('gap:small'),
+    ...COMMAND.filter((c) => otherChem.has(c)).map((c) => w(`chem:other>${c}`)),
+    ...COMMAND.filter((c) => otherGap.has(c)).map((c) => w(`gap:other~${c}`)),
     ...circuit.filter((c) => c !== 'BWM').map((c) => ({ name: `bias:${c}`, centre: 0, scale: 0.3, lo: -3, hi: 3 })),
     ...proprio.flatMap((c) => [
       { name: `gain:${c}`, centre: c === 'DB' || c === 'VB' ? -3 : 0, scale: 2, lo: -30, hi: 30 },
@@ -82,7 +114,7 @@ export function buildSpace(proprio: string[] = PROPRIO, task: Task = 'gait'): Sp
       { name: `extent:${c}`, centre: 0.15, scale: 0.1, lo: 0, hi: 0.6 },
     ]),
   ];
-  return { dims, chemKeys, gapKeys, smallChem, smallGap, proprio, task };
+  return { dims, chemKeys, gapKeys, smallChem, smallGap, otherChem, otherGap, proprio, task };
 }
 
 /** Parameter value of dimension d for search coordinate x (unit-scaled, clamped to the range). */
@@ -97,6 +129,8 @@ export function toFit(space: Space, x: ArrayLike<number>, name: string): Fit {
   for (const k of space.smallChem) fit.chem[k] = v.get('chem:small')!;
   for (const k of space.gapKeys) fit.gap[k] = v.get(`gap:${k}`)!;
   for (const k of space.smallGap) fit.gap[k] = v.get('gap:small')!;
+  for (const [c, keys] of space.otherChem) for (const k of keys) fit.chem[k] = v.get(`chem:other>${c}`)!;
+  for (const [c, keys] of space.otherGap) for (const k of keys) fit.gap[k] = v.get(`gap:other~${c}`)!;
   for (const c of CIRCUIT[space.task]) if (c !== 'BWM') fit.bias[c] = v.get(`bias:${c}`)!;
   for (const c of space.proprio) {
     fit.proprio.push({ cls: c, gain: v.get(`gain:${c}`)!, offset: v.get(`offset:${c}`)!, extent: v.get(`extent:${c}`)! });
@@ -111,6 +145,8 @@ export function fromFit(space: Space, fit: Fit): Float64Array {
   v.set('chem:small', space.smallChem.length ? (fit.chem[space.smallChem[0]!] ?? 0) : 0);
   for (const k of space.gapKeys) v.set(`gap:${k}`, fit.gap[k] ?? 0);
   v.set('gap:small', space.smallGap.length ? (fit.gap[space.smallGap[0]!] ?? 0) : 0);
+  for (const [c, keys] of space.otherChem) v.set(`chem:other>${c}`, fit.chem[keys[0]!] ?? 0);
+  for (const [c, keys] of space.otherGap) v.set(`gap:other~${c}`, fit.gap[keys[0]!] ?? 0);
   for (const [c, b] of Object.entries(fit.bias)) v.set(`bias:${c}`, b);
   for (const r of fit.proprio) {
     v.set(`gain:${r.cls}`, r.gain);

@@ -86,13 +86,13 @@ export function maxInputConductance(): number {
   return unfittedMax;
 }
 
-/** Penalty: Σ over neurons of (log10 of how far past the cap) squared, ×4. */
+/** Penalty: Σ over neurons of (log10 of how far past the cap) squared, ×20 (a cell 3× over costs about 4.5). */
 export function conductanceCost(net: Network): number {
   const cap = maxInputConductance();
   let c = 0;
   for (let i = 0; i < NEURON_COUNT; i++) {
     const over = Math.log10(inputConductance(net, i) / cap);
-    if (over > 0) c += 4 * over * over;
+    if (over > 0) c += 20 * over * over;
   }
   return c;
 }
