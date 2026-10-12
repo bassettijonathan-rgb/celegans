@@ -60,6 +60,12 @@ export interface NeuronParams {
   ambiguousMix: number;
   /** Standard deviation of the noise current, pA per √ms (channel noise; 0 = off). */
   noise: number;
+  /**
+   * Every cell's graded release at rest (section 4.2). Kunert 2014 set each
+   * release threshold so every synapse is half open at rest (0.5); M4b
+   * lowers it so quiet partners release little, as in the real worm.
+   */
+  restRelease: number;
 }
 
 export const DEFAULT_PARAMS: NeuronParams = {
@@ -73,6 +79,7 @@ export const DEFAULT_PARAMS: NeuronParams = {
   beta: 0.125,
   ambiguousMix: 0.5,
   noise: 0,
+  restRelease: 0.5,
 };
 
 /**
@@ -91,8 +98,14 @@ export interface Network {
   gapStart: Int32Array;
   gapOther: Int32Array;
   gapG: Float64Array;
-  /** Release threshold per neuron: its voltage at equilibrium with every synapse half open (Kunert 2014). */
+  /**
+   * Release threshold per cell, set so that at the resting state every cell
+   * releases `restRelease`: Kunert 2014's rule (every synapse half open)
+   * when restRelease is 0.5.
+   */
   vTh: Float64Array;
+  /** Resting voltage per cell: the equilibrium with every cell releasing `restRelease`. */
+  vRest: Float64Array;
   /**
    * Tonic conductance per cell from a fit, nS, signed: positive to eExc,
    * negative to eInh (0 when unfitted). A conductance, not a current, so it
@@ -127,6 +140,7 @@ export function slowOpen(v: number, half: number): number {
  * 1985) lose every synapse and gap junction, in and out, and their tonic drive.
  */
 export function buildNetwork(params: NeuronParams = DEFAULT_PARAMS, fit: Fit = UNFITTED, ablated: readonly number[] = []): Network {
+  if (fit.restRelease !== undefined && fit.restRelease !== params.restRelease) params = { ...params, restRelease: fit.restRelease };
   const n = connectome.cells.length;
   const { sectionsPerSynapse } = connectome;
   const dead = new Uint8Array(n);
@@ -156,7 +170,11 @@ export function buildNetwork(params: NeuronParams = DEFAULT_PARAMS, fit: Fit = U
   }
   // A cell's release threshold is its own property: keep the intact worm's,
   // so ablating one cell does not quietly retune its neighbours.
-  if (ablated.length > 0) net.vTh.set(buildNetwork(params, fit).vTh);
+  if (ablated.length > 0) {
+    const intact = buildNetwork(params, fit);
+    net.vTh.set(intact.vTh);
+    net.vRest.set(intact.vRest);
+  }
   for (const sl of fit.slow ?? []) {
     for (let i = 0; i < n; i++) if (fitClass(connectome.cells[i]!) === sl.cls) net.slowHalf[i] = net.vTh[i]! + sl.half;
   }
@@ -208,23 +226,28 @@ export function networkFromEdges(
     gapOther,
     gapG,
     vTh: new Float64Array(n),
+    vRest: new Float64Array(n),
     bias: new Float64Array(n),
     slowG: new Float64Array(n),
     slowHalf: new Float64Array(n),
     slowTau: new Float64Array(n).fill(1),
   };
 
-  // Equilibrium with s = 1/2 everywhere: a linear system in V (no capacitance term).
-  const half = new Float64Array(n).fill(0.5);
+  // Equilibrium with every cell releasing s0: a linear system in V (no
+  // capacitance term). The threshold then sits where the release curve gives s0.
+  const s0 = params.restRelease;
+  const rest = new Float64Array(n).fill(s0);
   const v = new Float64Array(n).fill(params.eLeak);
-  solveImplicit(net, half, 0, v, (i) => params.gLeak * params.eLeak + halfDrive(net, i), v);
-  net.vTh.set(v);
+  solveImplicit(net, rest, 0, v, (i) => params.gLeak * params.eLeak + restDrive(net, i, s0), v);
+  net.vRest.set(v);
+  const shift = Math.log(1 / s0 - 1) / params.beta;
+  for (let i = 0; i < n; i++) net.vTh[i] = v[i]! + shift;
   return net;
 }
 
-function halfDrive(net: Network, i: number): number {
+function restDrive(net: Network, i: number, s0: number): number {
   let b = 0;
-  for (let k = net.synStart[i]!; k < net.synStart[i + 1]!; k++) b += 0.5 * net.synG[k]! * net.synE[k]!;
+  for (let k = net.synStart[i]!; k < net.synStart[i + 1]!; k++) b += s0 * net.synG[k]! * net.synE[k]!;
   return b;
 }
 
@@ -251,10 +274,10 @@ export interface NeuronState {
 }
 
 export function createNeuronState(net: Network): NeuronState {
-  // V = V_th everywhere is the network's resting state: every synapse is then
-  // half open, which is exactly the equilibrium V_th was solved for.
-  const slow = Float64Array.from(net.vTh, (v, i) => (net.slowG[i]! > 0 ? slowOpen(v, net.slowHalf[i]!) : 0));
-  return { v: Float64Array.from(net.vTh), inject: new Float64Array(net.n), sense: new Float64Array(net.n), slow };
+  // V = V_rest everywhere is the network's resting state: every cell then
+  // releases restRelease, which is exactly the equilibrium V_rest was solved for.
+  const slow = Float64Array.from(net.vRest, (v, i) => (net.slowG[i]! > 0 ? slowOpen(v, net.slowHalf[i]!) : 0));
+  return { v: Float64Array.from(net.vRest), inject: new Float64Array(net.n), sense: new Float64Array(net.n), slow };
 }
 
 /**

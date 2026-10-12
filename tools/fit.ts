@@ -9,6 +9,7 @@
  *     [--task touch]   also fit the touch responses (V2a, V2b, V4a) over the touch circuit
  *     [--task bio]     gait only, with B cells sensing ahead, A behind, and slow channels (DESIGN.md 4.5)
  *     [--task steer]   as bio, and also fit backing up while AVA is lit (optogenetics)
+ *     [--rest 0.1]     every cell's release at rest (DESIGN.md 4.2; default the --from fit's, else 0.5)
  *
  * Deterministic for a given seed and worker count does not matter: each
  * candidate is scored independently.
@@ -35,7 +36,11 @@ mkdirSync(out, { recursive: true });
 const proprioIdx = args.indexOf('--proprio');
 const taskIdx = args.indexOf('--task');
 const task: Task = taskIdx >= 0 && ['touch', 'steer', 'bio'].includes(args[taskIdx + 1]!) ? (args[taskIdx + 1] as Task) : 'gait';
-const space = buildSpace(proprioIdx >= 0 ? args[proprioIdx + 1]!.split(',') : undefined, task);
+const fromIdx = args.indexOf('--from');
+const from = fromIdx >= 0 ? (JSON.parse(readFileSync(args[fromIdx + 1]!, 'utf8')) as Fit) : undefined;
+const restIdx = args.indexOf('--rest');
+const restRelease = restIdx >= 0 ? Number(args[restIdx + 1]) : from?.restRelease;
+const space = buildSpace(proprioIdx >= 0 ? args[proprioIdx + 1]!.split(',') : undefined, task, restRelease);
 const n = space.dims.length;
 const rng = new Rng(seed, Purpose.sim);
 
@@ -53,8 +58,7 @@ const c1 = ((n + 2) / 3) * (2 / ((n + 1.3) ** 2 + muEff));
 const cMu = Math.min(1 - c1, ((n + 2) / 3) * ((2 * (muEff - 2 + 1 / muEff)) / ((n + 2) ** 2 + muEff)));
 const chiN = Math.sqrt(n) * (1 - 1 / (4 * n) + 1 / (21 * n * n));
 
-const fromIdx = args.indexOf('--from');
-let mean = fromIdx >= 0 ? fromFit(space, JSON.parse(readFileSync(args[fromIdx + 1]!, 'utf8')) as Fit) : new Float64Array(n);
+let mean = from ? fromFit(space, from) : new Float64Array(n);
 let sigma = opt('sigma', 1);
 const diag = new Float64Array(n).fill(1);
 const ps = new Float64Array(n);
@@ -69,7 +73,7 @@ function evaluate(xs: Float64Array[]): Promise<(Score & { error?: string })[]> {
     const feed = (w: Worker) => {
       if (next >= xs.length) return;
       const id = next++;
-      w.postMessage({ id, x: [...xs[id]!], seed: 1, proprio: space.proprio, task });
+      w.postMessage({ id, x: [...xs[id]!], seed: 1, proprio: space.proprio, task, restRelease });
     };
     for (const w of pool) {
       w.removeAllListeners('message');
@@ -87,7 +91,7 @@ function evaluate(xs: Float64Array[]): Promise<(Score & { error?: string })[]> {
 const nameIdx = args.indexOf('--name');
 const runName = nameIdx >= 0 ? args[nameIdx + 1]! : `gait-${seed}`;
 const log = `${out}/${runName}.log`;
-writeFileSync(log, `${task} fit seed ${seed}, ${n} dims, lambda ${lambda}, stretch feedback in ${space.proprio.join(' ')}\n`);
+writeFileSync(log, `${task} fit seed ${seed}, ${n} dims, lambda ${lambda}, stretch feedback in ${space.proprio.join(' ')}, rest release ${restRelease ?? 0.5}\n`);
 let best = { cost: Infinity, x: new Float64Array(n), score: undefined as Score | undefined };
 const fmt = (g: Score['agar']) =>
   `${g.frequency.toFixed(2)} Hz λ ${g.wavelength.toFixed(2)} κL ${g.amplitude.toFixed(1)} v ${g.speed.toFixed(3)} coh ${g.coherence.toFixed(2)}`;

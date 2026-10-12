@@ -63,14 +63,15 @@ export interface Score {
 
 /**
  * A neuron's resting input conductance (nS): leak, every chemical synapse
- * half open, every gap junction. Real C. elegans neurons have input
- * resistances in the GΩ range (Goodman et al. 1998 ≈), about 1 nS; the
- * unfitted model's are 0.1 to 39 nS (median 1.4). The first gait fit let
- * motor cells reach 1,000 nS, which clamps them so no input can move them.
+ * open by the resting release (half open unless the fit lowers it), every
+ * gap junction. Real C. elegans neurons have input resistances in the GΩ
+ * range (Goodman et al. 1998 ≈), about 1 nS; the unfitted model's are 0.1
+ * to 39 nS (median 1.4). The first gait fit let motor cells reach 1,000 nS,
+ * which clamps them so no input can move them.
  */
 export function inputConductance(net: Network, i: number): number {
   let g = net.params.gLeak;
-  for (let k = net.synStart[i]!; k < net.synStart[i + 1]!; k++) g += 0.5 * net.synG[k]!;
+  for (let k = net.synStart[i]!; k < net.synStart[i + 1]!; k++) g += net.params.restRelease * net.synG[k]!;
   for (let k = net.gapStart[i]!; k < net.gapStart[i + 1]!; k++) g += net.gapG[k]!;
   // The slow channel counts fully open, so a latched cell stays under the cap too.
   return g + net.slowG[i]!;

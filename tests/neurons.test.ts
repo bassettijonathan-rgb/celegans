@@ -5,6 +5,7 @@ import {
   buildNetwork,
   createNeuronState,
   networkFromEdges,
+  release,
   stepNeurons,
   type NeuronState,
 } from '../src/sim/neurons';
@@ -238,5 +239,26 @@ describe('fitted signs of ambiguous synapses (DESIGN.md 3.2)', () => {
     for (let k = plain.synStart[ava]!; k < plain.synStart[ava + 1]!; k++) {
       if (plain.synPre[k] === avd) expect(plain.synE[k]).toBe(P.eInh + P.ambiguousMix * (P.eExc - P.eInh));
     }
+  });
+});
+
+describe('resting release (DESIGN.md 4.2, M4b)', () => {
+  it('puts every cell at rest releasing restRelease, and the network stays there', () => {
+    const net = buildNetwork({ ...P, restRelease: 0.1 });
+    const st = createNeuronState(net);
+    const s = new Float64Array(net.n);
+    release(net, st.v, s);
+    for (let i = 0; i < net.n; i++) expect(s[i]).toBeCloseTo(0.1, 9);
+    for (let t = 0; t < 200; t++) stepNeurons(net, st, 1);
+    for (let i = 0; i < net.n; i++) expect(Math.abs(st.v[i]! - net.vRest[i]!)).toBeLessThan(1e-6);
+  });
+
+  it('is Kunert 2014’s half-open rule by default, and a fit can lower it', () => {
+    const half = buildNetwork(P);
+    expect(half.vTh).toEqual(half.vRest);
+    const quiet = buildNetwork(P, { name: 't', chem: {}, gap: {}, bias: {}, proprio: [], restRelease: 0.1 });
+    expect(quiet.params.restRelease).toBe(0.1);
+    const ava = cellIndex('AVAL');
+    expect(quiet.vTh[ava]! - quiet.vRest[ava]!).toBeCloseTo(Math.log(9) / P.beta, 9);
   });
 });

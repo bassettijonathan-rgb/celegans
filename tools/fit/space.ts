@@ -63,11 +63,13 @@ export interface Space {
   slow: string[];
   /** Circuit class pairs with ambiguous edges whose excitatory share is fitted. */
   mixKeys: string[];
+  /** Resting release every candidate is built with (DESIGN.md 4.2; not fitted). Absent: 0.5. */
+  restRelease?: number;
   /** What is fitted: the gait alone, or the gait and the touch responses. */
   task: Task;
 }
 
-export function buildSpace(proprio: string[] = PROPRIO, task: Task = 'gait'): Space {
+export function buildSpace(proprio: string[] = PROPRIO, task: Task = 'gait', restRelease?: number): Space {
   const slow = task === 'gait' ? [] : SLOW;
   const circuit = CIRCUIT[task];
   const inMotor = (i: number) => circuit.includes(fitClass(connectome.cells[i]!));
@@ -134,7 +136,7 @@ export function buildSpace(proprio: string[] = PROPRIO, task: Task = 'gait'): Sp
       { name: `slowtau:${c}`, centre: 50, scale: 30, lo: 5, hi: 500 },
     ]),
   ];
-  return { dims, chemKeys, gapKeys, mixKeys, smallChem, smallGap, otherChem, otherGap, proprio, slow, task };
+  return { dims, chemKeys, gapKeys, mixKeys, smallChem, smallGap, otherChem, otherGap, proprio, slow, task, ...(restRelease === undefined ? {} : { restRelease }) };
 }
 
 /**
@@ -164,7 +166,7 @@ export function value(d: Dim, x: number): number {
 }
 
 export function toFit(space: Space, x: ArrayLike<number>, name: string): Fit {
-  const fit: Fit = { name, chem: {}, gap: {}, bias: {}, proprio: [] };
+  const fit: Fit = { name, chem: {}, gap: {}, bias: {}, proprio: [], ...(space.restRelease === undefined ? {} : { restRelease: space.restRelease }) };
   const v = new Map(space.dims.map((d, i) => [d.name, value(d, x[i]!)]));
   for (const k of space.chemKeys) fit.chem[k] = v.get(`chem:${k}`)!;
   for (const k of space.smallChem) fit.chem[k] = v.get('chem:small')!;
