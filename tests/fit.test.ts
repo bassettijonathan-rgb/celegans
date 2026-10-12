@@ -148,3 +148,21 @@ describe('continuing a fit in a larger circuit', () => {
     for (const k of stillSmall) expect(big.chem[k]).toBeCloseTo(pooledBefore, 9);
   });
 });
+
+describe('rectifying junctions in touch fits (DESIGN.md 4.6)', () => {
+  it('fixes the measured AVA–A junctions, fits the touch path ones, and round-trips them', async () => {
+    const { buildSpace, toFit, fromFit } = await import('../tools/fit/space');
+    const { MEASURED_RECT } = await import('../src/sim/fit');
+    const touch = buildSpace(undefined, 'touch');
+    expect(touch.rectKeys).toContain('AVA~AVD');
+    for (const k of Object.keys(MEASURED_RECT)) expect(touch.rectKeys).not.toContain(k);
+    const x = Float64Array.from(touch.dims, (_, i) => Math.cos(i));
+    const fit = toFit(touch, x, 't');
+    for (const [k, r] of Object.entries(MEASURED_RECT)) expect(fit.rect?.[k]).toBe(r);
+    for (const k of touch.rectKeys) expect(Math.abs(fit.rect![k]!)).toBeLessThanOrEqual(1);
+    const again = toFit(touch, fromFit(touch, fit), 't');
+    for (const k of touch.rectKeys) expect(again.rect![k]).toBeCloseTo(fit.rect![k]!, 9);
+    // The gait-only tasks leave every junction ohmic.
+    expect(toFit(buildSpace(undefined, 'bio'), new Float64Array(buildSpace(undefined, 'bio').dims.length), 'b').rect).toBeUndefined();
+  });
+});

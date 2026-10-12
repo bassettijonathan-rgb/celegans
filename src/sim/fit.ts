@@ -48,10 +48,31 @@ export interface Fit {
   proprio: ProprioFit[];
   /** Every cell's release at rest (DESIGN.md 4.2; absent: 0.5, Kunert 2014's half-open rule). */
   restRelease?: number;
+  /**
+   * Rectifying gap junctions per class pair, keyed like `gap` ('A~B', A ≤ B),
+   * -1 to 1 (DESIGN.md 4.6): positive passes current from A to B and shuts by
+   * that fraction the other way, negative from B to A. Pairs not here are ohmic.
+   * Measured pairs are in MEASURED_RECT; the rest are fitted guesses.
+   */
+  rect?: Record<string, number>;
   /** Slow inward channels per class (absent or empty: none). */
   slow?: SlowFit[];
   /** What it was fitted to, its score, seed and date (DESIGN.md section 7.3). */
   meta?: Record<string, string | number>;
+}
+
+/**
+ * Gap junctions measured to rectify. Liu, Chen, Mailler & Wang 2017: the
+ * UNC-7 (AVA) / UNC-9 (A motor neuron) junctions "only allow current flow
+ * from A-MNs into AVA" (recorded in VA5, VA8 and DA4).
+ */
+export const MEASURED_RECT: Record<string, number> = { 'AVA~DA': -1, 'AVA~VA': -1 };
+
+/** Rectification of the junction between cells a and b under a fit, oriented a → b. */
+export function gapRect(fit: Fit, a: number, b: number): number {
+  const r = fit.rect?.[gapKey(a, b)];
+  if (!r || classes[a] === classes[b]) return 0;
+  return classes[a]! < classes[b]! ? r : -r;
 }
 
 /** No fit: every class pair at the default strength, no bias, proprioception off. */

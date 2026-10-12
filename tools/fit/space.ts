@@ -14,7 +14,7 @@
  * The fit is free to move every one of these.
  */
 import { connectome } from '../../src/sim/connectome';
-import { chemKey, fitClass, gapKey, type Fit } from '../../src/sim/fit';
+import { MEASURED_RECT, chemKey, fitClass, gapKey, type Fit } from '../../src/sim/fit';
 
 export const MOTOR = ['DB', 'VB', 'DA', 'VA', 'DD', 'VD', 'AS', 'AVB', 'AVA', 'AVD', 'AVE', 'PVC', 'SMD', 'RMD', 'SMB', 'RME', 'BWM'];
 export const PROPRIO = ['DB', 'VB', 'DA', 'VA', 'SMD'];
@@ -69,6 +69,12 @@ export interface Space {
   slow: string[];
   /** Circuit class pairs with ambiguous edges whose excitatory share is fitted. */
   mixKeys: string[];
+  /**
+   * Gap class pairs whose rectification is fitted (touch task: the command
+   * cells' and touch receptors' own pairs; DESIGN.md 4.6). The measured
+   * pairs (MEASURED_RECT) are fixed, not fitted.
+   */
+  rectKeys: string[];
   /** Resting release every candidate is built with (DESIGN.md 4.2; not fitted). Absent: 0.5. */
   restRelease?: number;
   /** What is fitted: the gait alone, or the gait and the touch responses. */
@@ -106,6 +112,16 @@ export function buildSpace(proprio: string[] = PROPRIO, task: Task = 'gait', res
   const ambiguous = new Set<string>();
   for (const e of connectome.chemical) if (e.sign === 0 && inMotor(e.pre) && inMotor(e.post)) ambiguous.add(chemKey(e.pre, e.post));
   const mixKeys = task === 'gait' ? [] : chemKeys.filter((k) => ambiguous.has(k));
+  // Rectification (DESIGN.md 4.6) is fitted on the touch path only: the
+  // command cells' and receptors' own junctions between two different classes.
+  const touchPath = [...COMMAND, ...RECEPTORS];
+  const rectKeys =
+    task === 'touch'
+      ? gapKeys.filter((k) => {
+          const [a, b] = k.split('~');
+          return a !== b && (touchPath.includes(a!) || touchPath.includes(b!)) && !(k in MEASURED_RECT);
+        })
+      : [];
   const otherChem = new Map<string, string[]>();
   const otherGap = new Map<string, string[]>();
   if (task !== 'gait') {
@@ -142,13 +158,14 @@ export function buildSpace(proprio: string[] = PROPRIO, task: Task = 'gait', res
       { name: `extent:${c}`, centre: 0.15, scale: 0.1, lo: 0, hi: 0.6 },
     ]),
     ...mixKeys.map((k) => ({ name: `mix:${k}`, centre: 0.5, scale: 0.2, lo: 0, hi: 1 })),
+    ...rectKeys.map((k) => ({ name: `rect:${k}`, centre: 0, scale: 0.4, lo: -1, hi: 1 })),
     ...slow.flatMap((c) => [
       { name: `slowg:${c}`, centre: 2, scale: 1, lo: 0, hi: 10 },
       { name: `slowhalf:${c}`, centre: 0, scale: 3, lo: -20, hi: 20 },
       { name: `slowtau:${c}`, centre: 50, scale: 30, lo: 5, hi: 500 },
     ]),
   ];
-  return { dims, chemKeys, gapKeys, mixKeys, smallChem, smallGap, otherChem, otherGap, proprio, slow, task, ...(restRelease === undefined ? {} : { restRelease }) };
+  return { dims, chemKeys, gapKeys, mixKeys, rectKeys, smallChem, smallGap, otherChem, otherGap, proprio, slow, task, ...(restRelease === undefined ? {} : { restRelease }) };
 }
 
 /**
@@ -195,6 +212,7 @@ export function toFit(space: Space, x: ArrayLike<number>, name: string): Fit {
     fit.proprio.push({ cls: c, gain: v.get(`gain:${c}`)!, offset, extent });
   }
   if (space.mixKeys.length) fit.mix = Object.fromEntries(space.mixKeys.map((k) => [k, v.get(`mix:${k}`)!]));
+  if (space.task === 'touch') fit.rect = { ...MEASURED_RECT, ...Object.fromEntries(space.rectKeys.map((k) => [k, v.get(`rect:${k}`)!])) };
   if (space.slow.length) {
     fit.slow = space.slow.map((c) => ({ cls: c, g: v.get(`slowg:${c}`)!, half: v.get(`slowhalf:${c}`)!, tau: v.get(`slowtau:${c}`)! }));
   }
@@ -231,6 +249,7 @@ export function fromFit(space: Space, fit: Fit): Float64Array {
     v.set(`extent:${r.cls}`, r.extent);
   }
   for (const [k, m] of Object.entries(fit.mix ?? {})) v.set(`mix:${k}`, m);
+  for (const [k, r] of Object.entries(fit.rect ?? {})) v.set(`rect:${k}`, r);
   for (const r of fit.slow ?? []) {
     v.set(`slowg:${r.cls}`, r.g);
     v.set(`slowhalf:${r.cls}`, r.half);

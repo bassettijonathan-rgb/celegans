@@ -129,7 +129,7 @@ Rule: each edge's sign comes with a label.
 
 Gap junctions conduct both ways, with conductance ∝ count × a fitted scale per class pair. Many
 locomotion results depend on them (AVA and AVB are coupled to the A and B motor neurons through gap
-junctions; Kawano et al. 2011). Rectifying junctions are possible later; v1 treats all as ohmic.
+junctions; Kawano et al. 2011). Ohmic by default; from M4b a fit may make junctions rectify (4.6).
 
 ### 3.4 What the wiring misses (D7)
 
@@ -214,6 +214,11 @@ As built in M1 (`src/sim/neurons.ts`):
   copy of the paper.
 - `V_th` per neuron is the network's equilibrium with every synapse half open (Kunert 2014). That
   equilibrium is also the network's resting state.
+- **Resting release (M4b).** Half-open synapses at rest load every hub with tens of nS of always-on
+  input, so a few touch synapses cannot move it (section 9.2). A fit may therefore set the release
+  every cell has at rest, `restRelease` (default 0.5, Kunert's rule): the resting state is the
+  equilibrium with every cell releasing that much, and `V_th` sits `ln(1/s₀ − 1)/β` above it. The
+  M4b fits use 0.1 (a **guess**: graded synapses release a little at rest, Liu et al. 2009 ≈).
 - `ambiguous` edges get a reversal half way between E_inh and E_exc until fitted.
 - Gap junctions make the equations stiff (a well-coupled cell relaxes in ≈ 0.1 ms), so each step
   is backward Euler in V with release taken from the start of the step, solved by
@@ -272,6 +277,32 @@ regenerative current. The channel counts fully open towards the input-conductanc
 so a latched cell stays within real neurons' range. The shipped M4 fit turned out not to need it: switching every slow
 channel off leaves its gait almost unchanged (section 9.2). It stays available to later fits. Gating is plain data in the neuron state, so it
 saves and hashes; an ablated cell loses its channel. Tests in `tests/neurons.test.ts`.
+
+### 4.6 Rectifying gap junctions (M4b)
+
+Added in M4b with Marco's approval, after touch could not reach AVA through ohmic junctions: each
+cell on the touch path sits at roughly the average of its many gap partners, so every hop loses
+most of the signal (section 9.2). Real junctions need not be ohmic. Liu, Chen, Mailler & Wang 2017
+recorded the AVA–A motor neuron junctions (UNC-7 in AVA, UNC-9 in the A cells) and found they "only
+allow current flow from A-MNs into AVA", which they call probably the strongest rectification seen
+in native gap junctions. A junction between cells *i* and *j* with rectification ρ (−1 to 1):
+
+    g_eff = g · (1 − |ρ| · σ(∓(V_i − V_j) / 2 mV))
+
+where positive ρ passes current from *i* to *j* and shuts by the fraction |ρ| when *j* is the more
+depolarised (σ the logistic function; the sign flips for negative ρ). The 2 mV switch is a
+**guess** (steep, as Liu 2017 describe). The factor is the same seen from either cell, so the
+conductance matrix stays symmetric and the solver unchanged; it is taken from the start of each step,
+like release, and the resting state is iterated to its fixed point.
+
+- **Measured, fixed:** AVA–DA and AVA–VA, fully one way into AVA (Liu 2017; `MEASURED_RECT`).
+  Applied in every touch fit from M4b.
+- **Fitted guesses:** ρ for each touch-path class pair with its own strength (a command cell's or a
+  touch receptor's junctions with another class), in the touch task only. UNC-7/UNC-9 junctions
+  rectify in oocytes (Starich et al. 2009 ≈), which makes this plausible, but which way each of
+  these pairs passes current is not measured; the fit's choices are labelled as guesses.
+- The input-conductance cap counts every junction fully open. Tests in `tests/neurons.test.ts` and
+  `tests/fit.test.ts`.
 
 ---
 
