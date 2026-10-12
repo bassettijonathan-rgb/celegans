@@ -503,6 +503,19 @@ The cost function compares the simulated worm with numbers from papers, never wi
 - **Stop rule:** if no fit reaches the targets with parameters in physiological ranges, I stop and
   report what fails (and how) before changing the model. Same rule as the ants and creatures.
 
+### 7.4 Transmission calibration against the atlas (M4c)
+
+Added after touch (M4b) and salt (M5) both failed for the same reason: every sensory signal
+fades within two hops (section 9.2). `tools/data/build_atlas.py` extracts Randi et al. 2023's
+signal propagation atlas (`src/data/atlas.json`: per stimulated and responding neuron, mean ΔF/F,
+q value, trials; wild type and unc-31, which lacks neuropeptide release) and splits every ordered
+pair into a fitting half and a held-out half by a seeded hash, the same in both strains.
+`tools/fit/atlas.ts` runs the experiment in the model (light one cell with a 2 nS channel for
+0.5 s, network only, as in the immobilised worms; mean ΔV over 2 s against an unlit run).
+`tools/fit/atlasFit.ts` fits every class pair's strength to the unc-31 fitting half by the
+network's linear response at rest, with a fifth of the fitting half kept aside to check that the
+fit generalises. Findings in 9.3.
+
 ---
 
 ## 8. Sensory world
@@ -659,6 +672,27 @@ AVA (ρ = −0.75). Over 8 seeds it
   V2d) stays an open failure of this model. Likely causes to test next: the touch current (a 1 nS
   guess; ALM rises only ~6 mV), and the uniform 100 pS per gap section, which makes hubs average
   their partners; real AVA has 2.5 GΩ input resistance (Liu 2017), i.e. 0.4 nS in total.
+
+### 9.3 Findings: transmission calibration (M4c)
+
+- **The model is silent where the worm responds.** With the shipped weights the model shows 0% of
+  the significant responses in the fitting half (unc-31 and wild type); 90% of pairs move under
+  0.02 mV. In the atlas 6.7% of directly wired pairs respond significantly in unc-31 worms, and
+  responses barely shrink with distance (median |ΔF/F| 0.30 at one hop, 0.23 at four).
+- **Global settings switch between silence and flooding.** Raising the release slope (β 0.125 →
+  0.5 /mV) with synapses mostly closed at rest makes signals travel, but then 50 to 90% of all pairs
+  respond, more at four hops than at one: the network becomes globally excitable. No setting of
+  the global gap, synapse, slope and resting-release values gave sparse, non-fading transmission.
+- **Fitting each class pair does not generalise.** The linear-response fit lowers the training
+  loss but not the validation loss (78.8 → 78.2, about what predicting no response at all gives),
+  at any prior strength, and its validation hit rate stays at 2 to 5%.
+- **The wiring itself predicts the atlas weakly.** Ranking pairs by direct synapse count separates
+  responding from silent pairs with AUC 0.54 (unc-31) to 0.56 (wild type), and a two-hop path count
+  0.57 to 0.65 (0.5 is chance). Randi et al. 2023 reached the same conclusion: anatomy is a poor
+  predictor of signal propagation. The model's own responses score 0.49 to 0.54.
+- **What this means:** the atlas can bound how far and how densely signals spread, but not which
+  pathways carry them, so it cannot calibrate this model's transmission. The held-out half (V4b)
+  has not been scored.
 
 Honest expectations: V1 and V2 should pass. V3b and V4b are the hardest; V4b may come out only
 modestly above baseline, and that would be a real finding about connectome-only models, reported
