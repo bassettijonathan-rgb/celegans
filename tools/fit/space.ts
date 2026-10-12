@@ -18,6 +18,8 @@ import { chemKey, fitClass, gapKey, type Fit } from '../../src/sim/fit';
 
 export const MOTOR = ['DB', 'VB', 'DA', 'VA', 'DD', 'VD', 'AS', 'AVB', 'AVA', 'AVD', 'AVE', 'PVC', 'SMD', 'RMD', 'SMB', 'RME', 'BWM'];
 export const PROPRIO = ['DB', 'VB', 'DA', 'VA', 'SMD'];
+/** Classes given a slow inward channel in steer and touch fits (DESIGN.md section 4.5): the A and B motor neurons. */
+export const SLOW = ['DB', 'VB', 'DA', 'VA'];
 /**
  * The touch circuit added for M4 (Chalfie et al. 1985 ≈; DESIGN.md 5.1, 8.2):
  * the six touch receptors, DVA and LUA (PLM's partners) and RIM (coupled to
@@ -54,11 +56,13 @@ export interface Space {
   otherGap: Map<string, string[]>;
   /** Classes whose stretch feedback is fitted; the others have none. */
   proprio: string[];
+  slow: string[];
   /** What is fitted: the gait alone, or the gait and the touch responses. */
   task: Task;
 }
 
 export function buildSpace(proprio: string[] = PROPRIO, task: Task = 'gait'): Space {
+  const slow = task === 'gait' ? [] : SLOW;
   const circuit = CIRCUIT[task];
   const inMotor = (i: number) => circuit.includes(fitClass(connectome.cells[i]!));
   const chem = new Map<string, number>();
@@ -113,8 +117,13 @@ export function buildSpace(proprio: string[] = PROPRIO, task: Task = 'gait'): Sp
       { name: `offset:${c}`, ...offsetRange(c, task) },
       { name: `extent:${c}`, centre: 0.15, scale: 0.1, lo: 0, hi: 0.6 },
     ]),
+    ...slow.flatMap((c) => [
+      { name: `slowg:${c}`, centre: 2, scale: 1, lo: 0, hi: 10 },
+      { name: `slowhalf:${c}`, centre: 0, scale: 3, lo: -20, hi: 20 },
+      { name: `slowtau:${c}`, centre: 50, scale: 30, lo: 5, hi: 500 },
+    ]),
   ];
-  return { dims, chemKeys, gapKeys, smallChem, smallGap, otherChem, otherGap, proprio, task };
+  return { dims, chemKeys, gapKeys, smallChem, smallGap, otherChem, otherGap, proprio, slow, task };
 }
 
 /**
@@ -148,6 +157,9 @@ export function toFit(space: Space, x: ArrayLike<number>, name: string): Fit {
   for (const c of space.proprio) {
     fit.proprio.push({ cls: c, gain: v.get(`gain:${c}`)!, offset: v.get(`offset:${c}`)!, extent: v.get(`extent:${c}`)! });
   }
+  if (space.slow.length) {
+    fit.slow = space.slow.map((c) => ({ cls: c, g: v.get(`slowg:${c}`)!, half: v.get(`slowhalf:${c}`)!, tau: v.get(`slowtau:${c}`)! }));
+  }
   return fit;
 }
 
@@ -165,6 +177,11 @@ export function fromFit(space: Space, fit: Fit): Float64Array {
     v.set(`gain:${r.cls}`, r.gain);
     v.set(`offset:${r.cls}`, r.offset);
     v.set(`extent:${r.cls}`, r.extent);
+  }
+  for (const r of fit.slow ?? []) {
+    v.set(`slowg:${r.cls}`, r.g);
+    v.set(`slowhalf:${r.cls}`, r.half);
+    v.set(`slowtau:${r.cls}`, r.tau);
   }
   return Float64Array.from(space.dims, (d) => ((v.get(d.name) ?? d.centre) - d.centre) / d.scale);
 }

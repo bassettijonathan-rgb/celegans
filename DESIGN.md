@@ -254,6 +254,24 @@ chloride channels would. The first M3b fit, with currents, found a gait by drivi
 reversal potentials by construction (tested in `tests/fit.test.ts`). Currents remain only for the
 lab bench's electrode.
 
+### 4.5 Slow inward channel (rhythm source, M4)
+
+Added in M4 after B-cell stretch feedback alone failed to crawl (section 9.2), with Marco's
+approval. The A and B motor neurons (DA, VA, DB, VB) may carry one slow inward channel:
+
+    I_slow = g_slow · m · (E_exc − V),   dm/dt = (m∞(V) − m) / τ,   m∞ = 1 / (1 + exp(−(V − V_half) / 2 mV))
+
+With enough `g_slow` a cell latches: once pushed past `V_half` the channel holds it depolarised
+until an inhibitory push turns it off. A latching cell whose switch is driven by the bend the body
+itself makes is a relaxation oscillator; this is the mechanism of Boyle, Berri & Cohen 2012 ≈
+(bistable B units with stretch input). Fouad et al. 2018 ≈ found rhythm generators along the
+ventral cord, and the A and B motor neurons express calcium channels (EGL-19, UNC-2; Liu et al.
+2018 ≈ for A cells). Per class, `g_slow` (0 to 10 nS), `V_half` (relative to the cell's release
+threshold, ±20 mV) and `τ` (5 to 500 ms) are **fitted guesses**; the 2 mV slope is a guess for a
+regenerative current. The channel counts fully open towards the input-conductance cap (section 9.2),
+so a latched cell stays within real neurons' range. Gating is plain data in the neuron state, so it
+saves and hashes; an ablated cell loses its channel. Tests in `tests/neurons.test.ts`.
+
 ---
 
 ## 5. The motor system

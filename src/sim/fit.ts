@@ -18,6 +18,18 @@ export interface ProprioFit {
   extent: number;
 }
 
+/**
+ * One class's slow inward channel (DESIGN.md section 4.5): its fully open
+ * conductance (nS), half-activation relative to the cell's release threshold
+ * (mV) and time constant (ms). All fitted.
+ */
+export interface SlowFit {
+  cls: string;
+  g: number;
+  half: number;
+  tau: number;
+}
+
 export interface Fit {
   /** Short name, e.g. 'gait-1'. */
   name: string;
@@ -28,6 +40,8 @@ export interface Fit {
   /** Tonic current per class, pA: the drive the class gets from cells outside the model (peptides, upstream inputs). */
   bias: Record<string, number>;
   proprio: ProprioFit[];
+  /** Slow inward channels per class (absent or empty: none). */
+  slow?: SlowFit[];
   /** What it was fitted to, its score, seed and date (DESIGN.md section 7.3). */
   meta?: Record<string, string | number>;
 }

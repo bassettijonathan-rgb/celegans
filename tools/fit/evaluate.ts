@@ -72,7 +72,8 @@ export function inputConductance(net: Network, i: number): number {
   let g = net.params.gLeak;
   for (let k = net.synStart[i]!; k < net.synStart[i + 1]!; k++) g += 0.5 * net.synG[k]!;
   for (let k = net.gapStart[i]!; k < net.gapStart[i + 1]!; k++) g += net.gapG[k]!;
-  return g;
+  // The slow channel counts fully open, so a latched cell stays under the cap too.
+  return g + net.slowG[i]!;
 }
 
 /** The fit may not push any neuron past the largest input conductance in the unfitted wiring. */
