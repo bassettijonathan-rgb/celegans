@@ -24,6 +24,10 @@ export const PROPRIO = ['DB', 'VB', 'DA', 'VA', 'SMD'];
  * RMD (RMD has plateau potentials, Mellem et al. 2008 ≈).
  */
 export const SLOW = ['DB', 'VB', 'DA', 'VA', 'SMD', 'RMD'];
+// The touch task also gives the command interneurons one (M4b): a touch lasts
+// 100 ms but a reversal seconds, and the graded network forgets within
+// milliseconds. AVA and AVB switch between long-lasting high and low states in
+// whole-brain imaging (Kato et al. 2015 ≈; modelled as bistable by Roberts et al. 2016 ≈).
 /**
  * The touch circuit added for M4 (Chalfie et al. 1985 ≈; DESIGN.md 5.1, 8.2):
  * the six touch receptors, DVA and LUA (PLM's partners) and RIM (coupled to
@@ -70,7 +74,7 @@ export interface Space {
 }
 
 export function buildSpace(proprio: string[] = PROPRIO, task: Task = 'gait', restRelease?: number): Space {
-  const slow = task === 'gait' ? [] : SLOW;
+  const slow = task === 'gait' ? [] : task === 'touch' ? [...SLOW, ...COMMAND] : SLOW;
   const circuit = CIRCUIT[task];
   const inMotor = (i: number) => circuit.includes(fitClass(connectome.cells[i]!));
   const chem = new Map<string, number>();
