@@ -138,8 +138,15 @@ export function buildSpace(proprio: string[] = PROPRIO, task: Task = 'gait'): Sp
  * stops the field at the soma); A cells, which drive backing up, read the bend
  * behind them.
  */
+/**
+ * How far ahead of its soma a B cell's field must start (body fraction): a
+ * fit left free to read at the soma itself settled there, which is not
+ * the anterior sensing of Wen et al. 2012 ≈.
+ */
+const B_LEAD = 0.05;
+
 function offsetRange(c: string, task: Task): { centre: number; scale: number; lo: number; hi: number } {
-  if (task !== 'gait' && (c === 'DB' || c === 'VB')) return { centre: -0.15, scale: 0.1, lo: -0.5, hi: 0 };
+  if (task !== 'gait' && (c === 'DB' || c === 'VB')) return { centre: -0.15, scale: 0.1, lo: -0.5, hi: -B_LEAD };
   if (task !== 'gait' && (c === 'DA' || c === 'VA')) return { centre: 0.05, scale: 0.1, lo: 0, hi: 0.5 };
   return { centre: -0.15, scale: 0.1, lo: -0.5, hi: 0.5 };
 }
