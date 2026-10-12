@@ -118,3 +118,18 @@ describe('gait measurement', () => {
     }
   }, 30000);
 });
+
+describe('biological stretch fields (bio, steer and touch fits)', () => {
+  it('keeps every B cell field ahead of the soma and every A cell field behind it', async () => {
+    const { buildSpace, toFit } = await import('../tools/fit/space');
+    const space = buildSpace(undefined, 'bio');
+    for (const x of [-5, 0, 5]) {
+      const fit = toFit(space, new Float64Array(space.dims.length).fill(x), 't');
+      for (const r of fit.proprio) {
+        if (r.cls === 'DB' || r.cls === 'VB') expect(r.offset + r.extent).toBeLessThanOrEqual(1e-12);
+        if (r.cls === 'DA' || r.cls === 'VA') expect(r.offset).toBeGreaterThanOrEqual(0);
+      }
+      expect(fit.slow?.map((r) => r.cls)).toEqual(['DB', 'VB', 'DA', 'VA', 'SMD', 'RMD']);
+    }
+  });
+});

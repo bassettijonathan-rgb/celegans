@@ -134,8 +134,9 @@ export function buildSpace(proprio: string[] = PROPRIO, task: Task = 'gait'): Sp
  * Where a stretch-sensing class may read the body. For the gait task
  * anywhere within half a body length. Otherwise the fit follows
  * the biology (Wen et al. 2012; Xu et al. 2018 ≈): B cells, which drive
- * forward crawling, read the bend ahead of them (towards the head); A cells,
- * which drive backing up, read the bend behind them.
+ * forward crawling, read the bend ahead of them (towards the head; toFit also
+ * stops the field at the soma); A cells, which drive backing up, read the bend
+ * behind them.
  */
 function offsetRange(c: string, task: Task): { centre: number; scale: number; lo: number; hi: number } {
   if (task !== 'gait' && (c === 'DB' || c === 'VB')) return { centre: -0.15, scale: 0.1, lo: -0.5, hi: 0 };
@@ -159,7 +160,11 @@ export function toFit(space: Space, x: ArrayLike<number>, name: string): Fit {
   for (const [c, keys] of space.otherGap) for (const k of keys) fit.gap[k] = v.get(`gap:other~${c}`)!;
   for (const c of CIRCUIT[space.task]) if (c !== 'BWM') fit.bias[c] = v.get(`bias:${c}`)!;
   for (const c of space.proprio) {
-    fit.proprio.push({ cls: c, gain: v.get(`gain:${c}`)!, offset: v.get(`offset:${c}`)!, extent: v.get(`extent:${c}`)! });
+    const offset = v.get(`offset:${c}`)!;
+    let extent = v.get(`extent:${c}`)!;
+    // Outside the gait task a B cell's whole field lies ahead of it (offsetRange).
+    if (space.task !== 'gait' && (c === 'DB' || c === 'VB')) extent = Math.min(extent, -offset);
+    fit.proprio.push({ cls: c, gain: v.get(`gain:${c}`)!, offset, extent });
   }
   if (space.slow.length) {
     fit.slow = space.slow.map((c) => ({ cls: c, g: v.get(`slowg:${c}`)!, half: v.get(`slowhalf:${c}`)!, tau: v.get(`slowtau:${c}`)! }));
