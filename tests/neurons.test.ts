@@ -166,3 +166,77 @@ describe('the whole network', () => {
     expect(hashState(go(1))).not.toBe(hashState(go(2)));
   });
 });
+
+describe('slow inward channel (DESIGN.md section 4.5)', () => {
+  // One cell at rest (E_L) with a channel that opens 15 mV above it: on, it
+  // holds the cell near −12 mV; off, the leak holds it at rest. So it latches.
+  const latching = () => {
+    const net = networkFromEdges(1, [], []);
+    net.slowG[0] = 0.02;
+    net.slowHalf[0] = P.eLeak + 15;
+    net.slowTau[0] = 10;
+    const st = createNeuronState(net);
+    return { net, st };
+  };
+
+  it('stays at rest without a push', () => {
+    const { net, st } = latching();
+    run(net, st, 1000);
+    expect(st.v[0]!).toBeLessThan(P.eLeak + 3);
+  });
+
+  it('latches on after a brief depolarising pulse and off after a hyperpolarising one', () => {
+    const { net, st } = latching();
+    st.inject[0] = 0.25;
+    run(net, st, 200);
+    st.inject[0] = 0;
+    run(net, st, 2000);
+    expect(st.v[0]!).toBeGreaterThan(P.eLeak + 20);
+    expect(st.slow![0]!).toBeGreaterThan(0.9);
+    st.inject[0] = -2;
+    run(net, st, 200);
+    st.inject[0] = 0;
+    run(net, st, 2000);
+    expect(st.v[0]!).toBeLessThan(P.eLeak + 3);
+  });
+
+  it('never drives a cell past the excitatory reversal', () => {
+    const { net, st } = latching();
+    net.slowG[0] = 100;
+    st.inject[0] = 1;
+    run(net, st, 1000);
+    expect(st.v[0]!).toBeLessThanOrEqual(P.eExc + 1e-6 + 1 / 100);
+  });
+
+  it('comes from the fit, per class, with its half activation relative to the cell threshold', () => {
+    const fit = { name: 't', chem: {}, gap: {}, bias: {}, proprio: [], slow: [{ cls: 'VB', g: 3, half: 5, tau: 40 }] };
+    const net = buildNetwork(P, fit);
+    const vb = cellIndex('VB03');
+    expect(net.slowG[vb]).toBe(3);
+    expect(net.slowTau[vb]).toBe(40);
+    expect(net.slowHalf[vb]).toBeCloseTo(net.vTh[vb]! + 5, 9);
+    expect(net.slowG[cellIndex('DB03')]).toBe(0);
+    expect(buildNetwork(P, fit, [vb]).slowG[vb]).toBe(0);
+  });
+});
+
+describe('fitted signs of ambiguous synapses (DESIGN.md 3.2)', () => {
+  it('sets the reversal of every ambiguous edge in a class pair from the fitted excitatory share', () => {
+    const net = buildNetwork(P, { name: 't', chem: {}, gap: {}, bias: {}, proprio: [], mix: { 'AVD>AVA': 1 } });
+    const ava = cellIndex('AVAL');
+    const avd = cellIndex('AVDL');
+    let found = 0;
+    for (let k = net.synStart[ava]!; k < net.synStart[ava + 1]!; k++) {
+      if (net.synPre[k] === avd) {
+        expect(net.synE[k]).toBe(P.eExc);
+        found++;
+      }
+    }
+    expect(found).toBe(1);
+    // Unfitted, the same edge sits half way between the reversals.
+    const plain = buildNetwork(P);
+    for (let k = plain.synStart[ava]!; k < plain.synStart[ava + 1]!; k++) {
+      if (plain.synPre[k] === avd) expect(plain.synE[k]).toBe(P.eInh + P.ambiguousMix * (P.eExc - P.eInh));
+    }
+  });
+});

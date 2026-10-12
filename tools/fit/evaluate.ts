@@ -4,7 +4,10 @@
  */
 import { GaitRecorder, type Gait } from '../../src/sim/gait';
 import type { Fit } from '../../src/sim/fit';
-import { buildBrain, createWorld, setMedium, step, type Brain } from '../../src/sim/world';
+import { NEURON_COUNT } from '../../src/sim/connectome';
+import type { Network } from '../../src/sim/neurons';
+import { buildBrain, createWorld, network, setMedium, step, type Brain } from '../../src/sim/world';
+import { cellsOfClasses, driveFrom, settleWithGait, touchFrom, type TouchTrial } from './touchTrial';
 
 /**
  * Targets from DESIGN.md section 9 (V1a, V1b), Fang-Yen et al. 2010 ≈:
@@ -52,13 +55,141 @@ export function gaitCost(g: Gait, target: { frequency: readonly [number, number]
 
 export interface Score {
   cost: number;
+  /** The input-conductance penalty included in cost. */
+  conductance?: number;
   agar: Gait;
   water: Gait;
+}
+
+/**
+ * A neuron's resting input conductance (nS): leak, every chemical synapse
+ * half open, every gap junction. Real C. elegans neurons have input
+ * resistances in the GΩ range (Goodman et al. 1998 ≈), about 1 nS; the
+ * unfitted model's are 0.1 to 39 nS (median 1.4). The first gait fit let
+ * motor cells reach 1,000 nS, which clamps them so no input can move them.
+ */
+export function inputConductance(net: Network, i: number): number {
+  let g = net.params.gLeak;
+  for (let k = net.synStart[i]!; k < net.synStart[i + 1]!; k++) g += 0.5 * net.synG[k]!;
+  for (let k = net.gapStart[i]!; k < net.gapStart[i + 1]!; k++) g += net.gapG[k]!;
+  // The slow channel counts fully open, so a latched cell stays under the cap too.
+  return g + net.slowG[i]!;
+}
+
+/** The fit may not push any neuron past the largest input conductance in the unfitted wiring. */
+let unfittedMax: number | undefined;
+export function maxInputConductance(): number {
+  if (unfittedMax === undefined) {
+    const net = network();
+    unfittedMax = 0;
+    for (let i = 0; i < NEURON_COUNT; i++) unfittedMax = Math.max(unfittedMax, inputConductance(net, i));
+  }
+  return unfittedMax;
+}
+
+/** Penalty: Σ over neurons of (log10 of how far past the cap) squared, ×20 (a cell 3× over costs about 4.5). */
+export function conductanceCost(net: Network): number {
+  const cap = maxInputConductance();
+  let c = 0;
+  for (let i = 0; i < NEURON_COUNT; i++) {
+    const over = Math.log10(inputConductance(net, i) / cap);
+    if (over > 0) c += 20 * over * over;
+  }
+  return c;
 }
 
 export function score(fit: Fit, seed = 1): Score {
   const b = buildBrain(fit);
   const agar = gaitIn(b, TARGETS.agar.mix, seed, 2000, 6000);
   const water = gaitIn(b, TARGETS.water.mix, seed, 1000, 2000);
-  return { cost: gaitCost(agar, TARGETS.agar) + gaitCost(water, TARGETS.water), agar, water };
+  const conductance = conductanceCost(b.net);
+  return { cost: gaitCost(agar, TARGETS.agar) + gaitCost(water, TARGETS.water) + conductance, conductance, agar, water };
+}
+
+/**
+ * Touch targets (DESIGN.md section 9, all F): V2a, an anterior touch makes
+ * the worm back up within a second (Chalfie et al. 1985 ≈), measured against
+ * a sham trial from the same moment; V2b, a posterior
+ * touch makes it go forward at least as fast (Chalfie 1985 ≈); V4a, AVA is up
+ * and AVB down while it backs up (Kato et al. 2015 ≈); and it crawls forward
+ * again a few seconds later. The ablations (V2d) are held out.
+ */
+export const TOUCH_AT = { anterior: 0.15, posterior: 0.85 } as const;
+/** How fast the fit asks the worm to back up, mm/s (guess, about half its forward speed). */
+export const TARGET_REVERSE = 0.08;
+
+export function touchCost(a: TouchTrial, p: TouchTrial): number {
+  let c = 0;
+  // V2a: back up, at least TARGET_REVERSE at the fastest.
+  if (a.minSpeed > -TARGET_REVERSE) c += 4 * ((a.minSpeed + TARGET_REVERSE) / TARGET_REVERSE) ** 2;
+  // V4a: AVA up and AVB down after the anterior touch (per 5 mV short).
+  c += Math.max(0, (a.avaBefore + 5 - a.avaAfter) / 5) ** 2;
+  c += Math.max(0, (a.avbAfter - (a.avbBefore - 5)) / 5) ** 2;
+  // Forward again by the end.
+  c += Math.max(0, (0.05 - a.recovered) / 0.05) ** 2;
+  // V2b: posterior touch, no slower than before, and never backwards.
+  c += Math.max(0, (p.before - p.after) / Math.max(0.05, p.before)) ** 2;
+  c += Math.max(0, (0 - p.minSpeed) / 0.05) ** 2;
+  c += Math.max(0, (0.05 - p.recovered) / 0.05) ** 2;
+  return c;
+}
+
+export interface TouchScore extends Score {
+  anterior: TouchTrial;
+  posterior: TouchTrial;
+  /** The steering trial (AVA lit), kept in the touch fit so touch cannot undo it. */
+  ava: TouchTrial;
+}
+
+export function scoreTouch(fit: Fit, seed = 1): TouchScore {
+  const b = buildBrain(fit);
+  const s = settleWithGait(b, seed, 2000, 6000);
+  const agar = s.gait;
+  const water = gaitIn(b, TARGETS.water.mix, seed, 1000, 2000);
+  const sham = touchFrom(s, b, null).vel;
+  const anterior = touchFrom(s, b, TOUCH_AT.anterior, sham);
+  const posterior = touchFrom(s, b, TOUCH_AT.posterior, sham);
+  const ava = driveFrom(s, b, avaLight(), sham);
+  const conductance = conductanceCost(b.net);
+  const cost =
+    gaitCost(agar, TARGETS.agar) + gaitCost(water, TARGETS.water) + touchCost(anterior, posterior) + steerCost(ava) + conductance;
+  return { cost, conductance, agar, water, anterior, posterior, ava };
+}
+
+/**
+ * Steering (M4): light on AVA makes the worm back up while the light is on
+ * and crawl forward again after it (Guo et al. 2009 ≈; Kawano et al. 2011 ≈:
+ * optogenetic AVA activation causes reversals). The light conductance is a
+ * guess, about a channelrhodopsin's at saturating light.
+ */
+export const AVA_LIGHT = 2;
+
+/** Light on every AVA cell at AVA_LIGHT. */
+function avaLight(): Record<number, number> {
+  const light: Record<number, number> = {};
+  for (const c of cellsOfClasses(['AVA'])) light[c] = AVA_LIGHT;
+  return light;
+}
+
+export interface SteerScore extends Score {
+  ava: TouchTrial;
+}
+
+export function steerCost(t: TouchTrial): number {
+  let c = 0;
+  if (t.minSpeed > -TARGET_REVERSE) c += 4 * ((t.minSpeed + TARGET_REVERSE) / TARGET_REVERSE) ** 2;
+  c += Math.max(0, (0.05 - t.recovered) / 0.05) ** 2;
+  return c;
+}
+
+export function scoreSteer(fit: Fit, seed = 1): SteerScore {
+  const b = buildBrain(fit);
+  const s = settleWithGait(b, seed, 2000, 6000);
+  const agar = s.gait;
+  const water = gaitIn(b, TARGETS.water.mix, seed, 1000, 2000);
+  const sham = touchFrom(s, b, null).vel;
+  const ava = driveFrom(s, b, avaLight(), sham);
+  const conductance = conductanceCost(b.net);
+  const cost = gaitCost(agar, TARGETS.agar) + gaitCost(water, TARGETS.water) + steerCost(ava) + conductance;
+  return { cost, conductance, agar, water, ava };
 }

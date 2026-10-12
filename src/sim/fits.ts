@@ -7,7 +7,7 @@ import gait from '../data/fits/gait.json';
 import type { Fit } from './fit';
 import { buildBrain, type Brain } from './world';
 
-/** Strengths fitted so the brain crawls on agar and swims in water (V1a, V1b; M3b). */
+/** Strengths fitted so the brain crawls on agar and swims in water (V1a, V1b) and backs up while AVA is lit (M4). */
 export const GAIT_FIT: Fit = gait as Fit;
 
 let gaitBrain: Brain | undefined;

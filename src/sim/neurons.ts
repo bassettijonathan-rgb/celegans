@@ -16,6 +16,10 @@
  * section 4.3) use this graded model until their conductance-based models
  * arrive.
  *
+ * From M4 motor neurons can carry one slow inward channel (section 4.5),
+ * so a cell can latch on or off and, with stretch feedback through the body,
+ * oscillate: the rhythm source of Boyle, Berri & Cohen 2012 ≈.
+ *
  * From M3 the network also holds the 95 body-wall muscle cells (after the
  * 302 neurons), with the same graded membrane for now: they receive the
  * neuromuscular junctions and their gap junctions, and their "release" is the
@@ -24,7 +28,7 @@
  * conductance-based cells arrive.
  */
 import { connectome } from './connectome';
-import { UNFITTED, biasConductances, chemScale, gapScale, type Fit } from './fit';
+import { UNFITTED, biasConductances, chemKey, chemScale, fitClass, gapScale, type Fit } from './fit';
 import type { Rng } from './rng';
 
 /**
@@ -95,16 +99,40 @@ export interface Network {
    * can never push a cell beyond the reversal potentials.
    */
   bias: Float64Array;
+  /**
+   * Slow inward channel per cell (section 4.5): fully open conductance to
+   * eExc (nS; 0 = none), half activation (absolute, mV) and time constant (ms).
+   */
+  slowG: Float64Array;
+  slowHalf: Float64Array;
+  slowTau: Float64Array;
+}
+
+/**
+ * Voltage range over which the slow channel opens, mV: steep, as in a
+ * regenerative calcium current (guess; Boyle, Berri & Cohen 2012 ≈ model the
+ * B cells as switches).
+ */
+export const SLOW_SLOPE = 2;
+
+/** Open fraction of the slow channel at steady state for voltage v. */
+export function slowOpen(v: number, half: number): number {
+  return 1 / (1 + Math.exp(-(v - half) / SLOW_SLOPE));
 }
 
 /**
  * Builds the network of all 302 neurons and 95 muscle cells from the
- * connectome, with strengths scaled and tonic currents set by a fit
- * (DESIGN.md section 7.1).
+ * connectome, with strengths scaled and tonic conductances set by a fit
+ * (DESIGN.md section 7.1). Ablated cells (laser ablation, Chalfie et al.
+ * 1985) lose every synapse and gap junction, in and out, and their tonic drive.
  */
-export function buildNetwork(params: NeuronParams = DEFAULT_PARAMS, fit: Fit = UNFITTED): Network {
+export function buildNetwork(params: NeuronParams = DEFAULT_PARAMS, fit: Fit = UNFITTED, ablated: readonly number[] = []): Network {
   const n = connectome.cells.length;
-  const { chemical, gap, sectionsPerSynapse } = connectome;
+  const { sectionsPerSynapse } = connectome;
+  const dead = new Uint8Array(n);
+  for (const i of ablated) dead[i] = 1;
+  const chemical = connectome.chemical.filter((e) => !dead[e.pre] && !dead[e.post]);
+  const gap = connectome.gap.filter((e) => !dead[e.a] && !dead[e.b]);
   const net = networkFromEdges(
     n,
     chemical.map((e) => ({
@@ -112,11 +140,26 @@ export function buildNetwork(params: NeuronParams = DEFAULT_PARAMS, fit: Fit = U
       post: e.post,
       synapses: (e.size / sectionsPerSynapse.chemical) * chemScale(fit, e.pre, e.post),
       sign: e.sign,
+      mix: e.sign === 0 ? fit.mix?.[chemKey(e.pre, e.post)] : undefined,
     })),
     gap.map((e) => ({ a: e.a, b: e.b, synapses: (e.size / sectionsPerSynapse.gap) * gapScale(fit, e.a, e.b) })),
     params,
   );
   net.bias.set(biasConductances(fit));
+  for (const i of ablated) net.bias[i] = 0;
+  for (const sl of fit.slow ?? []) {
+    for (let i = 0; i < n; i++) {
+      if (dead[i] || fitClass(connectome.cells[i]!) !== sl.cls) continue;
+      net.slowG[i] = sl.g;
+      net.slowTau[i] = sl.tau;
+    }
+  }
+  // A cell's release threshold is its own property: keep the intact worm's,
+  // so ablating one cell does not quietly retune its neighbours.
+  if (ablated.length > 0) net.vTh.set(buildNetwork(params, fit).vTh);
+  for (const sl of fit.slow ?? []) {
+    for (let i = 0; i < n; i++) if (fitClass(connectome.cells[i]!) === sl.cls) net.slowHalf[i] = net.vTh[i]! + sl.half;
+  }
   return net;
 }
 
@@ -127,12 +170,12 @@ export function buildNetwork(params: NeuronParams = DEFAULT_PARAMS, fit: Fit = U
  */
 export function networkFromEdges(
   n: number,
-  chemical: { pre: number; post: number; synapses: number; sign: number }[],
+  chemical: { pre: number; post: number; synapses: number; sign: number; mix?: number | undefined }[],
   gap: { a: number; b: number; synapses: number }[],
   params: NeuronParams = DEFAULT_PARAMS,
 ): Network {
-  const eOf = (sign: number) =>
-    sign > 0 ? params.eExc : sign < 0 ? params.eInh : params.eInh + params.ambiguousMix * (params.eExc - params.eInh);
+  const eOf = (sign: number, mix = params.ambiguousMix) =>
+    sign > 0 ? params.eExc : sign < 0 ? params.eInh : params.eInh + mix * (params.eExc - params.eInh);
 
   const syn = [...chemical].sort((a, b) => a.post - b.post || a.pre - b.pre);
   const synStart = new Int32Array(n + 1);
@@ -140,7 +183,7 @@ export function networkFromEdges(
   for (let i = 0; i < n; i++) synStart[i + 1]! += synStart[i]!;
   const synPre = Int32Array.from(syn, (e) => e.pre);
   const synG = Float64Array.from(syn, (e) => params.gSynPerSynapse * e.synapses);
-  const synE = Float64Array.from(syn, (e) => eOf(e.sign));
+  const synE = Float64Array.from(syn, (e) => eOf(e.sign, e.mix));
 
   const pairs: [number, number, number][] = [];
   for (const e of gap) {
@@ -166,6 +209,9 @@ export function networkFromEdges(
     gapG,
     vTh: new Float64Array(n),
     bias: new Float64Array(n),
+    slowG: new Float64Array(n),
+    slowHalf: new Float64Array(n),
+    slowTau: new Float64Array(n).fill(1),
   };
 
   // Equilibrium with s = 1/2 everywhere: a linear system in V (no capacitance term).
@@ -200,12 +246,15 @@ export interface NeuronState {
    * test circuits can leave it out.
    */
   sense?: Float64Array;
+  /** Open fraction of each cell's slow channel (section 4.5; 0 where it has none). Optional like `sense`. */
+  slow?: Float64Array;
 }
 
 export function createNeuronState(net: Network): NeuronState {
   // V = V_th everywhere is the network's resting state: every synapse is then
   // half open, which is exactly the equilibrium V_th was solved for.
-  return { v: Float64Array.from(net.vTh), inject: new Float64Array(net.n), sense: new Float64Array(net.n) };
+  const slow = Float64Array.from(net.vTh, (v, i) => (net.slowG[i]! > 0 ? slowOpen(v, net.slowHalf[i]!) : 0));
+  return { v: Float64Array.from(net.vTh), inject: new Float64Array(net.n), sense: new Float64Array(net.n), slow };
 }
 
 /**
@@ -226,17 +275,28 @@ export function stepNeurons(net: Network, state: NeuronState, dt: number, rng?: 
   }
   // Tonic and sensory channels: signed conductances (positive to eExc, negative to eInh).
   const tonic = new Float64Array(n);
-  for (let i = 0; i < n; i++) tonic[i] = Math.abs(net.bias[i]! + (state.sense?.[i] ?? 0));
+  // The slow channel's open fraction is taken from the start of the step, like s.
+  const slowOpenG = (i: number) => (state.slow ? net.slowG[i]! * state.slow[i]! : 0);
+  for (let i = 0; i < n; i++) tonic[i] = Math.abs(net.bias[i]! + (state.sense?.[i] ?? 0)) + slowOpenG(i);
   const rhs = (i: number) => {
     const g = net.bias[i]! + (state.sense?.[i] ?? 0);
     let b = cdt * v0[i]! + params.gLeak * params.eLeak + state.inject[i]! + noise[i]!;
     b += g > 0 ? g * params.eExc : -g * params.eInh;
+    b += slowOpenG(i) * params.eExc;
     for (let k = net.synStart[i]!; k < net.synStart[i + 1]!; k++) b += net.synG[k]! * s[net.synPre[k]!]! * net.synE[k]!;
     return b;
   };
   const v = Float64Array.from(v0);
   solveImplicit(net, s, cdt, v, rhs, v, tonic);
   state.v.set(v);
+  // Slow channel gating relaxes towards its open fraction at the new voltage (exact for fixed V).
+  if (state.slow) {
+    for (let i = 0; i < n; i++) {
+      if (net.slowG[i] === 0) continue;
+      const target = slowOpen(v[i]!, net.slowHalf[i]!);
+      state.slow[i] = target + (state.slow[i]! - target) * Math.exp(-dt / net.slowTau[i]!);
+    }
+  }
 }
 
 /**

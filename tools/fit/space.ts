@@ -18,6 +18,27 @@ import { chemKey, fitClass, gapKey, type Fit } from '../../src/sim/fit';
 
 export const MOTOR = ['DB', 'VB', 'DA', 'VA', 'DD', 'VD', 'AS', 'AVB', 'AVA', 'AVD', 'AVE', 'PVC', 'SMD', 'RMD', 'SMB', 'RME', 'BWM'];
 export const PROPRIO = ['DB', 'VB', 'DA', 'VA', 'SMD'];
+/**
+ * Classes given a slow inward channel outside the gait task (DESIGN.md
+ * section 4.5): the A and B motor neurons, and the head motor neurons SMD and
+ * RMD (RMD has plateau potentials, Mellem et al. 2008 ≈).
+ */
+export const SLOW = ['DB', 'VB', 'DA', 'VA', 'SMD', 'RMD'];
+/**
+ * The touch circuit added for M4 (Chalfie et al. 1985 ≈; DESIGN.md 5.1, 8.2):
+ * the six touch receptors, DVA and LUA (PLM's partners) and RIM (coupled to
+ * AVA during reversals, Kato et al. 2015 ≈).
+ */
+export const TOUCH = ['ALM', 'AVM', 'PLM', 'PVM', 'DVA', 'LUA', 'RIM'];
+export type Task = 'gait' | 'bio' | 'steer' | 'touch';
+/**
+ * Command interneurons: hubs with hundreds of inputs from outside the motor
+ * and touch circuits. With every synapse at the same default strength, those
+ * inputs swamp the few from the touch receptors. The touch fit therefore
+ * scales each hub's outside inputs together, one number per hub and kind.
+ */
+export const COMMAND = ['AVA', 'AVB', 'AVD', 'AVE', 'PVC'];
+export const CIRCUIT: Record<Task, string[]> = { gait: MOTOR, bio: MOTOR, steer: MOTOR, touch: [...MOTOR, ...TOUCH] };
 const MIN_SECTIONS = 10;
 
 export interface Dim {
@@ -34,12 +55,22 @@ export interface Space {
   gapKeys: string[];
   smallChem: string[];
   smallGap: string[];
+  /** Per command class: its chemical and gap class pairs from outside the circuit (touch task only). */
+  otherChem: Map<string, string[]>;
+  otherGap: Map<string, string[]>;
   /** Classes whose stretch feedback is fitted; the others have none. */
   proprio: string[];
+  slow: string[];
+  /** Circuit class pairs with ambiguous edges whose excitatory share is fitted. */
+  mixKeys: string[];
+  /** What is fitted: the gait alone, or the gait and the touch responses. */
+  task: Task;
 }
 
-export function buildSpace(proprio: string[] = PROPRIO): Space {
-  const inMotor = (i: number) => MOTOR.includes(fitClass(connectome.cells[i]!));
+export function buildSpace(proprio: string[] = PROPRIO, task: Task = 'gait'): Space {
+  const slow = task === 'gait' ? [] : SLOW;
+  const circuit = CIRCUIT[task];
+  const inMotor = (i: number) => circuit.includes(fitClass(connectome.cells[i]!));
   const chem = new Map<string, number>();
   for (const e of connectome.chemical) {
     if (!inMotor(e.pre) || !inMotor(e.post)) continue;
@@ -57,6 +88,30 @@ export function buildSpace(proprio: string[] = PROPRIO): Space {
   const gapKeys = sorted(gap).filter((k) => gap.get(k)! >= MIN_SECTIONS);
   const smallChem = sorted(chem).filter((k) => chem.get(k)! < MIN_SECTIONS);
   const smallGap = sorted(gap).filter((k) => gap.get(k)! < MIN_SECTIONS);
+  // Ambiguous signs (DESIGN.md 3.2) are fitted per class pair outside the gait task.
+  const ambiguous = new Set<string>();
+  for (const e of connectome.chemical) if (e.sign === 0 && inMotor(e.pre) && inMotor(e.post)) ambiguous.add(chemKey(e.pre, e.post));
+  const mixKeys = task === 'gait' ? [] : chemKeys.filter((k) => ambiguous.has(k));
+  const otherChem = new Map<string, string[]>();
+  const otherGap = new Map<string, string[]>();
+  if (task !== 'gait') {
+    const add = (m: Map<string, string[]>, cmd: string, k: string) => {
+      const list = m.get(cmd) ?? [];
+      if (!list.includes(k)) list.push(k);
+      m.set(cmd, list);
+    };
+    for (const e of connectome.chemical) {
+      const post = fitClass(connectome.cells[e.post]!);
+      if (COMMAND.includes(post) && !inMotor(e.pre)) add(otherChem, post, chemKey(e.pre, e.post));
+    }
+    for (const e of connectome.gap) {
+      const a = fitClass(connectome.cells[e.a]!);
+      const b = fitClass(connectome.cells[e.b]!);
+      if (COMMAND.includes(a) && !inMotor(e.b)) add(otherGap, a, gapKey(e.a, e.b));
+      else if (COMMAND.includes(b) && !inMotor(e.a)) add(otherGap, b, gapKey(e.a, e.b));
+    }
+    for (const m of [otherChem, otherGap]) for (const list of m.values()) list.sort();
+  }
   const START_NMJ = 2;
   const w = (name: string): Dim => ({ name, centre: /^chem:(DB|VB|DA|VA|DD|VD|AS)>BWM$/.test(name) ? START_NMJ : 0, scale: 0.5, lo: -2, hi: 3 });
   const dims: Dim[] = [
@@ -64,14 +119,43 @@ export function buildSpace(proprio: string[] = PROPRIO): Space {
     w('chem:small'),
     ...gapKeys.map((k) => w(`gap:${k}`)),
     w('gap:small'),
-    ...MOTOR.filter((c) => c !== 'BWM').map((c) => ({ name: `bias:${c}`, centre: 0, scale: 0.3, lo: -3, hi: 3 })),
+    ...COMMAND.filter((c) => otherChem.has(c)).map((c) => w(`chem:other>${c}`)),
+    ...COMMAND.filter((c) => otherGap.has(c)).map((c) => w(`gap:other~${c}`)),
+    ...circuit.filter((c) => c !== 'BWM').map((c) => ({ name: `bias:${c}`, centre: 0, scale: 0.3, lo: -3, hi: 3 })),
     ...proprio.flatMap((c) => [
       { name: `gain:${c}`, centre: c === 'DB' || c === 'VB' ? -3 : 0, scale: 2, lo: -30, hi: 30 },
-      { name: `offset:${c}`, centre: -0.15, scale: 0.1, lo: -0.5, hi: 0.5 },
+      { name: `offset:${c}`, ...offsetRange(c, task) },
       { name: `extent:${c}`, centre: 0.15, scale: 0.1, lo: 0, hi: 0.6 },
     ]),
+    ...mixKeys.map((k) => ({ name: `mix:${k}`, centre: 0.5, scale: 0.2, lo: 0, hi: 1 })),
+    ...slow.flatMap((c) => [
+      { name: `slowg:${c}`, centre: 2, scale: 1, lo: 0, hi: 10 },
+      { name: `slowhalf:${c}`, centre: 0, scale: 3, lo: -20, hi: 20 },
+      { name: `slowtau:${c}`, centre: 50, scale: 30, lo: 5, hi: 500 },
+    ]),
   ];
-  return { dims, chemKeys, gapKeys, smallChem, smallGap, proprio };
+  return { dims, chemKeys, gapKeys, mixKeys, smallChem, smallGap, otherChem, otherGap, proprio, slow, task };
+}
+
+/**
+ * Where a stretch-sensing class may read the body. For the gait task
+ * anywhere within half a body length. Otherwise the fit follows
+ * the biology (Wen et al. 2012; Xu et al. 2018 ≈): B cells, which drive
+ * forward crawling, read the bend ahead of them (towards the head; toFit also
+ * stops the field at the soma); A cells, which drive backing up, read the bend
+ * behind them.
+ */
+/**
+ * How far ahead of its soma a B cell's field must start (body fraction): a
+ * fit left free to read at the soma itself settled there, which is not
+ * the anterior sensing of Wen et al. 2012 ≈.
+ */
+const B_LEAD = 0.05;
+
+function offsetRange(c: string, task: Task): { centre: number; scale: number; lo: number; hi: number } {
+  if (task !== 'gait' && (c === 'DB' || c === 'VB')) return { centre: -0.15, scale: 0.1, lo: -0.5, hi: -B_LEAD };
+  if (task !== 'gait' && (c === 'DA' || c === 'VA')) return { centre: 0.05, scale: 0.1, lo: 0, hi: 0.5 };
+  return { centre: -0.15, scale: 0.1, lo: -0.5, hi: 0.5 };
 }
 
 /** Parameter value of dimension d for search coordinate x (unit-scaled, clamped to the range). */
@@ -86,9 +170,19 @@ export function toFit(space: Space, x: ArrayLike<number>, name: string): Fit {
   for (const k of space.smallChem) fit.chem[k] = v.get('chem:small')!;
   for (const k of space.gapKeys) fit.gap[k] = v.get(`gap:${k}`)!;
   for (const k of space.smallGap) fit.gap[k] = v.get('gap:small')!;
-  for (const c of MOTOR) if (c !== 'BWM') fit.bias[c] = v.get(`bias:${c}`)!;
+  for (const [c, keys] of space.otherChem) for (const k of keys) fit.chem[k] = v.get(`chem:other>${c}`)!;
+  for (const [c, keys] of space.otherGap) for (const k of keys) fit.gap[k] = v.get(`gap:other~${c}`)!;
+  for (const c of CIRCUIT[space.task]) if (c !== 'BWM') fit.bias[c] = v.get(`bias:${c}`)!;
   for (const c of space.proprio) {
-    fit.proprio.push({ cls: c, gain: v.get(`gain:${c}`)!, offset: v.get(`offset:${c}`)!, extent: v.get(`extent:${c}`)! });
+    const offset = v.get(`offset:${c}`)!;
+    let extent = v.get(`extent:${c}`)!;
+    // Outside the gait task a B cell's whole field lies ahead of it (offsetRange).
+    if (space.task !== 'gait' && (c === 'DB' || c === 'VB')) extent = Math.min(extent, -offset);
+    fit.proprio.push({ cls: c, gain: v.get(`gain:${c}`)!, offset, extent });
+  }
+  if (space.mixKeys.length) fit.mix = Object.fromEntries(space.mixKeys.map((k) => [k, v.get(`mix:${k}`)!]));
+  if (space.slow.length) {
+    fit.slow = space.slow.map((c) => ({ cls: c, g: v.get(`slowg:${c}`)!, half: v.get(`slowhalf:${c}`)!, tau: v.get(`slowtau:${c}`)! }));
   }
   return fit;
 }
@@ -100,11 +194,19 @@ export function fromFit(space: Space, fit: Fit): Float64Array {
   v.set('chem:small', space.smallChem.length ? (fit.chem[space.smallChem[0]!] ?? 0) : 0);
   for (const k of space.gapKeys) v.set(`gap:${k}`, fit.gap[k] ?? 0);
   v.set('gap:small', space.smallGap.length ? (fit.gap[space.smallGap[0]!] ?? 0) : 0);
+  for (const [c, keys] of space.otherChem) v.set(`chem:other>${c}`, fit.chem[keys[0]!] ?? 0);
+  for (const [c, keys] of space.otherGap) v.set(`gap:other~${c}`, fit.gap[keys[0]!] ?? 0);
   for (const [c, b] of Object.entries(fit.bias)) v.set(`bias:${c}`, b);
   for (const r of fit.proprio) {
     v.set(`gain:${r.cls}`, r.gain);
     v.set(`offset:${r.cls}`, r.offset);
     v.set(`extent:${r.cls}`, r.extent);
+  }
+  for (const [k, m] of Object.entries(fit.mix ?? {})) v.set(`mix:${k}`, m);
+  for (const r of fit.slow ?? []) {
+    v.set(`slowg:${r.cls}`, r.g);
+    v.set(`slowhalf:${r.cls}`, r.half);
+    v.set(`slowtau:${r.cls}`, r.tau);
   }
   return Float64Array.from(space.dims, (d) => ((v.get(d.name) ?? d.centre) - d.centre) / d.scale);
 }

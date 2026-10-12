@@ -254,6 +254,25 @@ chloride channels would. The first M3b fit, with currents, found a gait by drivi
 reversal potentials by construction (tested in `tests/fit.test.ts`). Currents remain only for the
 lab bench's electrode.
 
+### 4.5 Slow inward channel (rhythm source, M4)
+
+Added in M4 after B-cell stretch feedback alone failed to crawl (section 9.2), with Marco's
+approval. The A and B motor neurons (DA, VA, DB, VB) may carry one slow inward channel:
+
+    I_slow = g_slow · m · (E_exc − V),   dm/dt = (m∞(V) − m) / τ,   m∞ = 1 / (1 + exp(−(V − V_half) / 2 mV))
+
+With enough `g_slow` a cell latches: once pushed past `V_half` the channel holds it depolarised
+until an inhibitory push turns it off. A latching cell whose switch is driven by the bend the body
+itself makes is a relaxation oscillator; this is the mechanism of Boyle, Berri & Cohen 2012 ≈
+(bistable B units with stretch input). Fouad et al. 2018 ≈ found rhythm generators along the
+ventral cord, and the A and B motor neurons express calcium channels (EGL-19, UNC-2; Liu et al.
+2018 ≈ for A cells). Per class, `g_slow` (0 to 10 nS), `V_half` (relative to the cell's release
+threshold, ±20 mV) and `τ` (5 to 500 ms) are **fitted guesses**; the 2 mV slope is a guess for a
+regenerative current. The channel counts fully open towards the input-conductance cap (section 9.2),
+so a latched cell stays within real neurons' range. The shipped M4 fit turned out not to need it: switching every slow
+channel off leaves its gait almost unchanged (section 9.2). It stays available to later fits. Gating is plain data in the neuron state, so it
+saves and hashes; an ablated cell loses its channel. Tests in `tests/neurons.test.ts`.
+
 ---
 
 ## 5. The motor system
@@ -533,6 +552,65 @@ any later fit that passes it is weaker evidence than a first look. Tools: `npm r
 <fit.json>` (V1c), `npm run rhythm` (V5); tests in `tests/science/gait.test.ts`, where V1c is
 marked as a known failure.
 
+### 9.2 Findings so far: M4 (touch and reversals; no fit shipped yet)
+
+- **The M3b fit's strengths are implausible.** It scaled the motor circuit until AVA had about
+  1,000 nS of resting input conductance (every chemical synapse half open, plus gap junctions).
+  Real C. elegans neurons are around 1 nS (GΩ input resistance; Goodman et al. 1998 ≈); the
+  unfitted wiring ranges 0.1–39 nS. So clamped, 200 pA into AVA moved it 0.15 mV. Fits now pay a
+  penalty for any neuron above 39 nS (`conductanceCost` in `tools/fit/evaluate.ts`).
+- **Hubs drown the touch pathway.** A head touch depolarises ALM and AVM by 12–19 mV, but with
+  every synapse at the same default strength AVD moves 0.1 mV: its hundreds of other inputs
+  outweigh the few from the touch cells. The touch and steer fits therefore scale each command
+  interneuron's inputs from outside the circuit as a group (`COMMAND` in `tools/fit/space.ts`).
+- **The fitted rhythm ignores the command cells.** In the M3b fit, driving AVA with 200 pA and
+  holding AVB 17 mV down leaves the gait unchanged: the rhythm runs through A-cell stretch
+  feedback (V5), so the forward/backward switch has nothing to act on. Real worms switch there:
+  AVB drives forward through the B cells, AVA backward through the A cells.
+- **Under the cap, steering and gait trade off.** A fit asking for forward crawling and swimming
+  plus backing up while AVA is lit (optogenetics; Guo et al. 2009 ≈, Kawano et al. 2011 ≈) found,
+  at best: backing up at 0.05 mm/s (target 0.08) and crawling forward again after the light, but
+  crawling at only 0.2 Hz and 0.015 mm/s and swimming at 1.3 Hz. No generation in the next 100
+  improved on that; later ones either steered or crawled, not both.
+- **B-cell stretch alone makes no crawl (2026-10-12).** Redoing the gait the biological way
+  (B cells read the bend ahead and drive forward; A cells read the bend behind and drive backward;
+  the cap kept), a sweep of B stretch gain (−15 to 30 nS), field offset (0.05 to 0.4 body ahead) and
+  length (0.05 to 0.3) found no crawl on agar anywhere, and only a weak swim in water (κL ≤ 1.3,
+  target ≥ 3). A fit from the best point stayed flat. With graded neurons, a stretch reflex
+  passes a bend backwards but nothing makes the bend in the first place. Published models that
+  crawl this way add a rhythm source: bistable B motor neurons (Boyle, Berri & Cohen 2012 ≈) or
+  oscillators in the head and along the cord (Fouad et al. 2018 ≈; Xu et al. 2018 ≈ for A cells).
+  Our neuron model (section 4) has neither, so this needs a model change, not more fitting.
+- **The real-way gait (2026-10-12), shipped in M4.** With B cells required to read at least 5% of
+  the body ahead of them and A cells behind them, a gait-only fit and then a steering fit
+  (`steer-bio-19`, now `src/data/fits/gait.json`) found a gait with every neuron under the
+  input-conductance cap: crawling 0.51 Hz (λ 0.73, κL 2.0) and swimming 1.49 Hz (λ 1.22, κL 4.0).
+  V1a and V1b miss narrowly (agar λ above 0.7 and κL below 3; water λ below 1.3) and are marked
+  as known failures. **V1c (held out) now passes**: between water and agar, frequency falls
+  1.49 → 0.51 Hz and wavelength 1.22 → 0.73 steadily (`npm run viscosity`), as Fang-Yen et al.
+  2010 ≈ found.
+- **Where its rhythm comes from (V5, `npm run rhythm`).** Switching off DB, VB or DA stretch
+  stops the gait; VA and SMD stretch do not matter. Switching off every slow channel (section 4.5)
+  changes almost nothing (0.49 Hz agar, 1.62 Hz water), so **the slow channel turned out not to be
+  the missing rhythm source**: the B-only sweep failed for want of DA's stretch input (gain −3.4,
+  reading 0.32 to 0.92 of a body length behind it), which the fit found once A cells were free to
+  read behind them. B cells reading ahead now carry the forward wave, as Wen et al. 2012 ≈ found,
+  but forward crawling still leans on an A cell (DA). In real worms A-cell ablation spares forward
+  crawling (Chalfie et al. 1985 ≈), so this remains a divergence to check in the ablation tests.
+- **Steering works.** Lighting AVA (2 nS) makes the worm back up at 0.026 to 0.091 mm/s in 5 of 8
+  worms (target 0.08; Guo et al. 2009 ≈) and crawl forward again after the light. Whether it backs
+  up depends on where in the stroke the light comes on; real worms back up almost every time.
+  `npm run steer` and `tests/science/steer.test.ts` check it.
+- **Touch still cannot reach AVA.** Touching the nose depolarises ALM and AVM by about 10 mV but AVD
+  and AVA by under 1 mV, and anterior and posterior touches change the gait identically (by
+  nothing). Fitting the signs of ambiguous synapses (section 3.2; AVD→AVA was left half way, so
+  AVD could not excite AVA) and strengthening the ALM/AVM → AVD path by hand did not help. The cause
+  is the model's resting state (section 4.2): every synapse is half open at rest, so AVD, AVA and
+  AVB each sit on 17 to 50 nS of synapses from dozens of partners, and a receptor's input is a
+  sliver of that. In the real worm most of those partners are quiet at rest. Fixing this means
+  changing how release thresholds are set, a model change.
+- **What works:** a tail touch speeds the worm up (0.04 → 0.12 mm/s, V2b) in the capped touch fit.
+
 Honest expectations: V1 and V2 should pass. V3b and V4b are the hardest; V4b may come out only
 modestly above baseline, and that would be a real finding about connectome-only models, reported
 as such rather than tuned away.
@@ -606,7 +684,12 @@ the worker setup. Its body code does not (D9), and that repo is not changed.
   The head oscillator and intrinsic A-cell oscillation (D8) are not built yet; the A-cell model
   needs the papers M1b is waiting for.
 - **M4 Touch and reversals.** Touch receptors, nose touch, command switch, omega turns, spontaneous
-  reversals. V2a–e, V4a. Ablation and optogenetics tools.
+  reversals. V2a–e, V4a. Ablation and optogenetics tools. Split in two after the findings in 9.2.
+  **M4a** (done): touch receptors and click-to-touch, laser ablation, light channels, the
+  input-conductance cap, the slow channel (4.5), fitted signs of ambiguous synapses (3.2), and a
+  refitted gait in which B cells read ahead and AVA light makes the worm back up; V1c passes,
+  V1a and V1b miss narrowly, touch does not yet reach AVA. **M4b** (next): synapses mostly closed
+  at rest, so touch can reach the command cells; then touch reversals, V2a–e, V4a.
 - **M5 Salt chemotaxis.** Salt field, ASE, full fitting ensemble. V3a–c, V4b.
 - **M6 Lab bench polish.** Evidence-label browser, ensemble switcher, CSV export, assay presets.
 

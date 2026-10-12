@@ -4,7 +4,9 @@
  * ?stim=AVML,PLML starts with those neurons stimulated (the first selected;
  * a class name such as VD stimulates the whole class);
  * ?view=brain opens the brain view; ?medium=0..1 sets water (0) to agar (1);
- * ?puppet=1 starts with the puppet drive on (by default the fitted brain drives the body).
+ * ?puppet=1 starts with the puppet drive on (by default the fitted brain drives the body);
+ * ?kill=ALM,AVM starts with those neurons (or classes) killed by laser.
+ * Clicking the worm on the plate touches it there (eyelash, DESIGN.md 8.2).
  */
 import { Application } from 'pixi.js';
 import { BrainView } from './render/brainView';
@@ -15,6 +17,9 @@ import { formatWormTime } from './sim/time';
 import type { FromWorker, ToWorker } from './worker/protocol';
 
 type Mode = 'plate' | 'brain';
+
+/** How close to the centreline a click counts as touching the worm, µm. */
+const TOUCH_REACH = 60;
 
 async function start(): Promise<void> {
   const stage = document.getElementById('stage')!;
@@ -111,17 +116,48 @@ async function start(): Promise<void> {
     followButton.setAttribute('aria-pressed', String(follow));
   });
 
-  // A click (not a drag) on the brain picks the nearest neuron.
+  // A click (not a drag) on the brain picks the nearest neuron; on the plate it touches the worm.
   let down: { x: number; y: number } | undefined;
   stage.addEventListener('pointerdown', (e) => (down = { x: e.clientX, y: e.clientY }));
   stage.addEventListener('pointerup', (e) => {
-    if (mode !== 'brain' || !down || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 4) return;
+    if (!down || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 4) return;
     const rect = stage.getBoundingClientRect();
+    if (mode === 'plate') {
+      if (!last) return;
+      const p = plate.root.toLocal({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+      let best = -1;
+      let bestD = TOUCH_REACH;
+      for (let i = 0; i < last.x.length; i++) {
+        const d = Math.hypot(last.x[i]! - p.x, last.y[i]! - p.y);
+        if (d < bestD) [best, bestD] = [i, d];
+      }
+      if (best >= 0) send({ type: 'touch', at: best / (last.x.length - 1) });
+      return;
+    }
     const p = brain.root.toLocal({ x: e.clientX - rect.left, y: e.clientY - rect.top });
     brain.selected = brain.pick(p.x, p.y);
     brain.drawLinks();
     render();
   });
+
+  // Laser: kill the selected neuron or its class; the worker rebuilds the brain without them.
+  const kill = document.getElementById('kill') as HTMLButtonElement;
+  const killClass = document.getElementById('kill-class') as HTMLButtonElement;
+  const killed = document.getElementById('killed')!;
+  const setKilled = (cells: number[]) => send({ type: 'ablate', cells });
+  kill.addEventListener('click', () => {
+    const s = brain.selected;
+    if (s < 0 || !last) return;
+    setKilled(last.ablated.includes(s) ? last.ablated.filter((c) => c !== s) : [...last.ablated, s]);
+  });
+  killClass.addEventListener('click', () => {
+    const s = brain.selected;
+    if (s < 0 || !last) return;
+    const members = classMembers(connectome.cells[s]!.class);
+    const all = members.every((i) => last!.ablated.includes(i));
+    setKilled(all ? last.ablated.filter((c) => !members.includes(c)) : [...new Set([...last.ablated, ...members])]);
+  });
+  document.getElementById('revive')!.addEventListener('click', () => setKilled([]));
 
   const render = () => {
     if (!last || !rest) return;
@@ -129,6 +165,9 @@ async function start(): Promise<void> {
     const s = brain.selected;
     stim.disabled = s < 0;
     stimClass.disabled = s < 0;
+    kill.disabled = s < 0;
+    killClass.disabled = s < 0;
+    killed.textContent = last.ablated.length ? `Killed: ${last.ablated.map((i) => connectome.cells[i]!.name).join(' ')}` : '';
     if (s < 0) {
       info.innerHTML = 'Click a neuron to see it and its connections.';
       stim.textContent = 'Stimulate';
@@ -147,6 +186,9 @@ async function start(): Promise<void> {
       `In: ${ins.length} synapses (${count(ins, 'predicted')} sign predicted, ${count(ins, 'ambiguous')} unknown) · ` +
       `out: ${outs.length}${nmj ? ` + ${nmj} onto muscle` : ''} · ${gaps} gap junctions`;
     stim.textContent = last.inject[s] !== 0 ? 'Stop stimulating' : 'Stimulate';
+    kill.textContent = last.ablated.includes(s) ? `Revive ${c.name}` : `Kill ${c.name} (laser)`;
+    const killedAll = classMembers(c.class).every((i) => last!.ablated.includes(i));
+    killClass.textContent = `${killedAll ? 'Revive' : 'Kill'} all ${c.class}`;
     const members = classMembers(c.class);
     stimClass.textContent = `${members.every((i) => last!.inject[i] !== 0) ? 'Stop' : 'Stimulate'} all ${c.class} (${members.length})`;
   };
@@ -191,6 +233,14 @@ async function start(): Promise<void> {
       send({ type: 'inject', neuron: i, pA: Number(amp.value) });
       if (brain.selected < 0) brain.selected = i;
     }
+  }
+  const killNames = (params.get('kill') ?? '').split(',').map((n) => n.trim().toUpperCase()).filter(Boolean);
+  if (killNames.length) {
+    const cells = killNames.flatMap((name) => {
+      const one = connectome.cells.slice(0, NEURON_COUNT).flatMap((c, i) => (c.name === name ? [i] : []));
+      return one.length ? one : classMembers(name);
+    });
+    setKilled(cells);
   }
   brain.drawLinks();
 
