@@ -115,7 +115,7 @@ for (let gen = 0; gen < generations; gen++) {
     fit.meta = {
       fittedTo:
         task === 'touch'
-          ? 'V1a, V1b gait + V2a, V2b touch responses + V4a command interneurons (DESIGN.md 7.2); V1c and ablations (V2d) held out'
+          ? 'V1a, V1b gait + V2a, V2b touch responses + V4a command interneurons + backing up while AVA is lit (DESIGN.md 7.2); V1c and ablations (V2d) held out'
           : task === 'steer'
             ? 'V1a, V1b gait + backing up while AVA is lit (DESIGN.md 7.2); V1c and ablations held out'
             : 'V1a crawling + V1b swimming gait (DESIGN.md 7.2); V1c held out',
@@ -126,12 +126,12 @@ for (let gen = 0; gen < generations; gen++) {
       agar: fmt(best.score!.agar),
       water: fmt(best.score!.water),
       ...(task === 'touch' ? { touch: fmtTouch(best.score as TouchScore) } : {}),
-      ...(task === 'steer' ? { steer: fmtSteer(best.score as SteerScore) } : {}),
+      ...(task === 'steer' || task === 'touch' ? { steer: fmtSteer(best.score as SteerScore) } : {}),
     };
     writeFileSync(`${out}/${runName}.json`, JSON.stringify(fit, null, 1) + '\n');
   }
   const s = scores[top]!;
-  appendFileSync(log, `gen ${gen} best ${topCost.toFixed(3)} (ever ${best.cost.toFixed(3)}) σ ${sigma.toFixed(3)} | agar ${fmt(s.agar)} | water ${fmt(s.water)} | g ${(s.conductance ?? 0).toFixed(2)}${task === 'touch' && !s.error ? ' | ' + fmtTouch(s as TouchScore) : ''}${task === 'steer' && !s.error ? ' | ' + fmtSteer(s as SteerScore) : ''}${s.error ? ' ERR ' + s.error : ''}\n`);
+  appendFileSync(log, `gen ${gen} best ${topCost.toFixed(3)} (ever ${best.cost.toFixed(3)}) σ ${sigma.toFixed(3)} | agar ${fmt(s.agar)} | water ${fmt(s.water)} | g ${(s.conductance ?? 0).toFixed(2)}${task === 'touch' && !s.error ? ' | ' + fmtTouch(s as TouchScore) : ''}${(task === 'steer' || task === 'touch') && !s.error ? ' | ' + fmtSteer(s as SteerScore) : ''}${s.error ? ' ERR ' + s.error : ''}\n`);
 
   // Update (sep-CMA-ES).
   const old = mean;

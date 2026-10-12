@@ -14,7 +14,8 @@
     "fit": "tsx tools/fit.ts",
     "viscosity": "tsx tools/viscosity.ts",
     "rhythm": "tsx tools/rhythm.ts",
-    "touch": "tsx tools/touch.ts"
+    "touch": "tsx tools/touch.ts",
+    "steer": "tsx tools/steer.ts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

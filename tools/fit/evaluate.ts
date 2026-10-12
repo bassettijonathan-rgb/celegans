@@ -137,6 +137,8 @@ export function touchCost(a: TouchTrial, p: TouchTrial): number {
 export interface TouchScore extends Score {
   anterior: TouchTrial;
   posterior: TouchTrial;
+  /** The steering trial (AVA lit), kept in the touch fit so touch cannot undo it. */
+  ava: TouchTrial;
 }
 
 export function scoreTouch(fit: Fit, seed = 1): TouchScore {
@@ -147,9 +149,11 @@ export function scoreTouch(fit: Fit, seed = 1): TouchScore {
   const sham = touchFrom(s, b, null).vel;
   const anterior = touchFrom(s, b, TOUCH_AT.anterior, sham);
   const posterior = touchFrom(s, b, TOUCH_AT.posterior, sham);
+  const ava = driveFrom(s, b, avaLight(), sham);
   const conductance = conductanceCost(b.net);
-  const cost = gaitCost(agar, TARGETS.agar) + gaitCost(water, TARGETS.water) + touchCost(anterior, posterior) + conductance;
-  return { cost, conductance, agar, water, anterior, posterior };
+  const cost =
+    gaitCost(agar, TARGETS.agar) + gaitCost(water, TARGETS.water) + touchCost(anterior, posterior) + steerCost(ava) + conductance;
+  return { cost, conductance, agar, water, anterior, posterior, ava };
 }
 
 /**
@@ -159,6 +163,13 @@ export function scoreTouch(fit: Fit, seed = 1): TouchScore {
  * guess, about a channelrhodopsin's at saturating light.
  */
 export const AVA_LIGHT = 2;
+
+/** Light on every AVA cell at AVA_LIGHT. */
+function avaLight(): Record<number, number> {
+  const light: Record<number, number> = {};
+  for (const c of cellsOfClasses(['AVA'])) light[c] = AVA_LIGHT;
+  return light;
+}
 
 export interface SteerScore extends Score {
   ava: TouchTrial;
@@ -177,9 +188,7 @@ export function scoreSteer(fit: Fit, seed = 1): SteerScore {
   const agar = s.gait;
   const water = gaitIn(b, TARGETS.water.mix, seed, 1000, 2000);
   const sham = touchFrom(s, b, null).vel;
-  const light: Record<number, number> = {};
-  for (const c of cellsOfClasses(['AVA'])) light[c] = AVA_LIGHT;
-  const ava = driveFrom(s, b, light, sham);
+  const ava = driveFrom(s, b, avaLight(), sham);
   const conductance = conductanceCost(b.net);
   const cost = gaitCost(agar, TARGETS.agar) + gaitCost(water, TARGETS.water) + steerCost(ava) + conductance;
   return { cost, conductance, agar, water, ava };
