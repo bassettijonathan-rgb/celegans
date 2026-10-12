@@ -641,6 +641,24 @@ marked as a known failure.
   sliver of that. In the real worm most of those partners are quiet at rest. Fixing this means
   changing how release thresholds are set, a model change.
 - **What works:** a tail touch speeds the worm up (0.04 → 0.12 mm/s, V2b) in the capped touch fit.
+- **M4b: closing synapses at rest was not enough.** With every cell releasing 10% at rest (4.2),
+  slow channels in the command cells (4.5) and each touch receptor output fitted on its own, four
+  touch fits (touch-rest-24 to 27) never raised AVA by more than 1 mV after a nose touch; even ten
+  times the touch current gave AVA +3 mV. The hops lose the signal: ALM +18 mV, AVD +5 mV, AVA +3 mV.
+  Every cell on the path is tied by gap junctions to many partners (34 of AVA's 37 nS are gap
+  junctions), so it sits near their average.
+- **M4b: rectifying junctions did not fix it either.** With AVA–A junctions one way into AVA (Liu
+  et al. 2017) and rectification fitted on 24 touch-path pairs (4.6), the best fit (touch-rect-28)
+  backs up after a nose touch on the seed it was fitted on (−0.15 mm/s), with AVB down 5 mV but AVA
+  still not up (−1.3 mV), even though the fit made the AVD–AVA junction pass current mainly into
+AVA (ρ = −0.75). Over 8 seeds it
+  reverses in 4, and posterior touches slow the worm about as often, so the response is not
+  touch-specific. Ablations: killing ALM and AVM stops the reversals (0 of 8), killing AVD nearly
+  (1 of 8), but killing AVA does not (3 of 8), so whatever backs the worm up does not go through
+  AVA. **Not shipped**: the app keeps the M4a fit. Touch reversal (V2a, V2b across seeds, V4a,
+  V2d) stays an open failure of this model. Likely causes to test next: the touch current (a 1 nS
+  guess; ALM rises only ~6 mV), and the uniform 100 pS per gap section, which makes hubs average
+  their partners; real AVA has 2.5 GΩ input resistance (Liu 2017), i.e. 0.4 nS in total.
 
 Honest expectations: V1 and V2 should pass. V3b and V4b are the hardest; V4b may come out only
 modestly above baseline, and that would be a real finding about connectome-only models, reported
@@ -719,8 +737,9 @@ the worker setup. Its body code does not (D9), and that repo is not changed.
   **M4a** (done): touch receptors and click-to-touch, laser ablation, light channels, the
   input-conductance cap, the slow channel (4.5), fitted signs of ambiguous synapses (3.2), and a
   refitted gait in which B cells read ahead and AVA light makes the worm back up; V1c passes,
-  V1a and V1b miss narrowly, touch does not yet reach AVA. **M4b** (next): synapses mostly closed
-  at rest, so touch can reach the command cells; then touch reversals, V2a–e, V4a.
+  V1a and V1b miss narrowly, touch does not yet reach AVA. **M4b** (done, touch not solved):
+  resting release (4.2), slow channels for command cells, rectifying gap junctions (4.6). Touch
+  still does not reach AVA (9.2), so V2a–e and V4a remain open; the app keeps the M4a fit.
 - **M5 Salt chemotaxis.** Salt field, ASE, full fitting ensemble. V3a–c, V4b.
 - **M6 Lab bench polish.** Evidence-label browser, ensemble switcher, CSV export, assay presets.
 
