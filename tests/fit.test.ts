@@ -133,3 +133,36 @@ describe('biological stretch fields (bio, steer and touch fits)', () => {
     }
   });
 });
+
+describe('continuing a fit in a larger circuit', () => {
+  it('keeps every strength the smaller fit set on its own, and its pooled small-edge strength', async () => {
+    const { buildSpace, toFit, fromFit } = await import('../tools/fit/space');
+    const bio = buildSpace(undefined, 'bio');
+    const x = Float64Array.from(bio.dims, (_, i) => Math.sin(i));
+    const small = toFit(bio, x, 'bio');
+    const touch = buildSpace(undefined, 'touch');
+    const big = toFit(touch, fromFit(touch, small), 'touch');
+    for (const k of bio.chemKeys.filter((k) => touch.chemKeys.includes(k))) expect(big.chem[k]).toBeCloseTo(small.chem[k]!, 9);
+    const pooledBefore = small.chem[bio.smallChem[0]!]!;
+    const stillSmall = bio.smallChem.filter((k) => touch.smallChem.includes(k));
+    for (const k of stillSmall) expect(big.chem[k]).toBeCloseTo(pooledBefore, 9);
+  });
+});
+
+describe('rectifying junctions in touch fits (DESIGN.md 4.6)', () => {
+  it('fixes the measured AVA–A junctions, fits the touch path ones, and round-trips them', async () => {
+    const { buildSpace, toFit, fromFit } = await import('../tools/fit/space');
+    const { MEASURED_RECT } = await import('../src/sim/fit');
+    const touch = buildSpace(undefined, 'touch');
+    expect(touch.rectKeys).toContain('AVA~AVD');
+    for (const k of Object.keys(MEASURED_RECT)) expect(touch.rectKeys).not.toContain(k);
+    const x = Float64Array.from(touch.dims, (_, i) => Math.cos(i));
+    const fit = toFit(touch, x, 't');
+    for (const [k, r] of Object.entries(MEASURED_RECT)) expect(fit.rect?.[k]).toBe(r);
+    for (const k of touch.rectKeys) expect(Math.abs(fit.rect![k]!)).toBeLessThanOrEqual(1);
+    const again = toFit(touch, fromFit(touch, fit), 't');
+    for (const k of touch.rectKeys) expect(again.rect![k]).toBeCloseTo(fit.rect![k]!, 9);
+    // The gait-only tasks leave every junction ohmic.
+    expect(toFit(buildSpace(undefined, 'bio'), new Float64Array(buildSpace(undefined, 'bio').dims.length), 'b').rect).toBeUndefined();
+  });
+});

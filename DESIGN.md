@@ -129,7 +129,7 @@ Rule: each edge's sign comes with a label.
 
 Gap junctions conduct both ways, with conductance ∝ count × a fitted scale per class pair. Many
 locomotion results depend on them (AVA and AVB are coupled to the A and B motor neurons through gap
-junctions; Kawano et al. 2011). Rectifying junctions are possible later; v1 treats all as ohmic.
+junctions; Kawano et al. 2011). Ohmic by default; from M4b a fit may make junctions rectify (4.6).
 
 ### 3.4 What the wiring misses (D7)
 
@@ -214,6 +214,11 @@ As built in M1 (`src/sim/neurons.ts`):
   copy of the paper.
 - `V_th` per neuron is the network's equilibrium with every synapse half open (Kunert 2014). That
   equilibrium is also the network's resting state.
+- **Resting release (M4b).** Half-open synapses at rest load every hub with tens of nS of always-on
+  input, so a few touch synapses cannot move it (section 9.2). A fit may therefore set the release
+  every cell has at rest, `restRelease` (default 0.5, Kunert's rule): the resting state is the
+  equilibrium with every cell releasing that much, and `V_th` sits `ln(1/s₀ − 1)/β` above it. The
+  M4b fits use 0.1 (a **guess**: graded synapses release a little at rest, Liu et al. 2009 ≈).
 - `ambiguous` edges get a reversal half way between E_inh and E_exc until fitted.
 - Gap junctions make the equations stiff (a well-coupled cell relaxes in ≈ 0.1 ms), so each step
   is backward Euler in V with release taken from the start of the step, solved by
@@ -272,6 +277,32 @@ regenerative current. The channel counts fully open towards the input-conductanc
 so a latched cell stays within real neurons' range. The shipped M4 fit turned out not to need it: switching every slow
 channel off leaves its gait almost unchanged (section 9.2). It stays available to later fits. Gating is plain data in the neuron state, so it
 saves and hashes; an ablated cell loses its channel. Tests in `tests/neurons.test.ts`.
+
+### 4.6 Rectifying gap junctions (M4b)
+
+Added in M4b with Marco's approval, after touch could not reach AVA through ohmic junctions: each
+cell on the touch path sits at roughly the average of its many gap partners, so every hop loses
+most of the signal (section 9.2). Real junctions need not be ohmic. Liu, Chen, Mailler & Wang 2017
+recorded the AVA–A motor neuron junctions (UNC-7 in AVA, UNC-9 in the A cells) and found they "only
+allow current flow from A-MNs into AVA", which they call probably the strongest rectification seen
+in native gap junctions. A junction between cells *i* and *j* with rectification ρ (−1 to 1):
+
+    g_eff = g · (1 − |ρ| · σ(∓(V_i − V_j) / 2 mV))
+
+where positive ρ passes current from *i* to *j* and shuts by the fraction |ρ| when *j* is the more
+depolarised (σ the logistic function; the sign flips for negative ρ). The 2 mV switch is a
+**guess** (steep, as Liu 2017 describe). The factor is the same seen from either cell, so the
+conductance matrix stays symmetric and the solver unchanged; it is taken from the start of each step,
+like release, and the resting state is iterated to its fixed point.
+
+- **Measured, fixed:** AVA–DA and AVA–VA, fully one way into AVA (Liu 2017; `MEASURED_RECT`).
+  Applied in every touch fit from M4b.
+- **Fitted guesses:** ρ for each touch-path class pair with its own strength (a command cell's or a
+  touch receptor's junctions with another class), in the touch task only. UNC-7/UNC-9 junctions
+  rectify in oocytes (Starich et al. 2009 ≈), which makes this plausible, but which way each of
+  these pairs passes current is not measured; the fit's choices are labelled as guesses.
+- The input-conductance cap counts every junction fully open. Tests in `tests/neurons.test.ts` and
+  `tests/fit.test.ts`.
 
 ---
 
@@ -610,6 +641,24 @@ marked as a known failure.
   sliver of that. In the real worm most of those partners are quiet at rest. Fixing this means
   changing how release thresholds are set, a model change.
 - **What works:** a tail touch speeds the worm up (0.04 → 0.12 mm/s, V2b) in the capped touch fit.
+- **M4b: closing synapses at rest was not enough.** With every cell releasing 10% at rest (4.2),
+  slow channels in the command cells (4.5) and each touch receptor output fitted on its own, four
+  touch fits (touch-rest-24 to 27) never raised AVA by more than 1 mV after a nose touch; even ten
+  times the touch current gave AVA +3 mV. The hops lose the signal: ALM +18 mV, AVD +5 mV, AVA +3 mV.
+  Every cell on the path is tied by gap junctions to many partners (34 of AVA's 37 nS are gap
+  junctions), so it sits near their average.
+- **M4b: rectifying junctions did not fix it either.** With AVA–A junctions one way into AVA (Liu
+  et al. 2017) and rectification fitted on 24 touch-path pairs (4.6), the best fit (touch-rect-28)
+  backs up after a nose touch on the seed it was fitted on (−0.15 mm/s), with AVB down 5 mV but AVA
+  still not up (−1.3 mV), even though the fit made the AVD–AVA junction pass current mainly into
+AVA (ρ = −0.75). Over 8 seeds it
+  reverses in 4, and posterior touches slow the worm about as often, so the response is not
+  touch-specific. Ablations: killing ALM and AVM stops the reversals (0 of 8), killing AVD nearly
+  (1 of 8), but killing AVA does not (3 of 8), so whatever backs the worm up does not go through
+  AVA. **Not shipped**: the app keeps the M4a fit. Touch reversal (V2a, V2b across seeds, V4a,
+  V2d) stays an open failure of this model. Likely causes to test next: the touch current (a 1 nS
+  guess; ALM rises only ~6 mV), and the uniform 100 pS per gap section, which makes hubs average
+  their partners; real AVA has 2.5 GΩ input resistance (Liu 2017), i.e. 0.4 nS in total.
 
 Honest expectations: V1 and V2 should pass. V3b and V4b are the hardest; V4b may come out only
 modestly above baseline, and that would be a real finding about connectome-only models, reported
@@ -688,8 +737,9 @@ the worker setup. Its body code does not (D9), and that repo is not changed.
   **M4a** (done): touch receptors and click-to-touch, laser ablation, light channels, the
   input-conductance cap, the slow channel (4.5), fitted signs of ambiguous synapses (3.2), and a
   refitted gait in which B cells read ahead and AVA light makes the worm back up; V1c passes,
-  V1a and V1b miss narrowly, touch does not yet reach AVA. **M4b** (next): synapses mostly closed
-  at rest, so touch can reach the command cells; then touch reversals, V2a–e, V4a.
+  V1a and V1b miss narrowly, touch does not yet reach AVA. **M4b** (done, touch not solved):
+  resting release (4.2), slow channels for command cells, rectifying gap junctions (4.6). Touch
+  still does not reach AVA (9.2), so V2a–e and V4a remain open; the app keeps the M4a fit.
 - **M5 Salt chemotaxis.** Salt field, ASE, full fitting ensemble. V3a–c, V4b.
 - **M6 Lab bench polish.** Evidence-label browser, ensemble switcher, CSV export, assay presets.
 

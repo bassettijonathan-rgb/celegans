@@ -28,7 +28,7 @@
  * conductance-based cells arrive.
  */
 import { connectome } from './connectome';
-import { UNFITTED, biasConductances, chemKey, chemScale, fitClass, gapScale, type Fit } from './fit';
+import { UNFITTED, biasConductances, chemKey, chemScale, fitClass, gapRect, gapScale, type Fit } from './fit';
 import type { Rng } from './rng';
 
 /**
@@ -60,6 +60,12 @@ export interface NeuronParams {
   ambiguousMix: number;
   /** Standard deviation of the noise current, pA per √ms (channel noise; 0 = off). */
   noise: number;
+  /**
+   * Every cell's graded release at rest (section 4.2). Kunert 2014 set each
+   * release threshold so every synapse is half open at rest (0.5); M4b
+   * lowers it so quiet partners release little, as in the real worm.
+   */
+  restRelease: number;
 }
 
 export const DEFAULT_PARAMS: NeuronParams = {
@@ -73,6 +79,7 @@ export const DEFAULT_PARAMS: NeuronParams = {
   beta: 0.125,
   ambiguousMix: 0.5,
   noise: 0,
+  restRelease: 0.5,
 };
 
 /**
@@ -91,8 +98,22 @@ export interface Network {
   gapStart: Int32Array;
   gapOther: Int32Array;
   gapG: Float64Array;
-  /** Release threshold per neuron: its voltage at equilibrium with every synapse half open (Kunert 2014). */
+  /**
+   * Rectification per gap entry (cell i, partner j), -1 to 1 (section 4.6):
+   * positive passes current from i to j and shuts by that fraction the other
+   * way; negative the reverse; 0 an ordinary ohmic junction.
+   */
+  gapRect: Float64Array;
+  /** True when any junction rectifies (the solver then rescales gaps each step). */
+  rectifying: boolean;
+  /**
+   * Release threshold per cell, set so that at the resting state every cell
+   * releases `restRelease`: Kunert 2014's rule (every synapse half open)
+   * when restRelease is 0.5.
+   */
   vTh: Float64Array;
+  /** Resting voltage per cell: the equilibrium with every cell releasing `restRelease`. */
+  vRest: Float64Array;
   /**
    * Tonic conductance per cell from a fit, nS, signed: positive to eExc,
    * negative to eInh (0 when unfitted). A conductance, not a current, so it
@@ -115,6 +136,33 @@ export interface Network {
  */
 export const SLOW_SLOPE = 2;
 
+/**
+ * Voltage difference over which a rectifying junction switches, mV (guess:
+ * Liu et al. 2017 ≈ found AVA–A junctions shut almost completely one way, so
+ * the switch is steep).
+ */
+export const RECT_SLOPE = 2;
+
+/**
+ * Open fraction of a gap entry with rectification rho at voltage
+ * difference dv = V_i − V_j. The same for both directions of a junction
+ * (rho and dv both flip sign), so the conductance matrix stays symmetric.
+ */
+export function gapOpen(rho: number, dv: number): number {
+  if (rho === 0) return 1;
+  const shut = rho > 0 ? 1 / (1 + Math.exp(dv / RECT_SLOPE)) : 1 / (1 + Math.exp(-dv / RECT_SLOPE));
+  return 1 - Math.abs(rho) * shut;
+}
+
+/** Each gap entry's conductance at voltages v, into out. */
+export function gapConductances(net: Network, v: Float64Array, out: Float64Array): void {
+  for (let i = 0; i < net.n; i++) {
+    for (let k = net.gapStart[i]!; k < net.gapStart[i + 1]!; k++) {
+      out[k] = net.gapG[k]! * gapOpen(net.gapRect[k]!, v[i]! - v[net.gapOther[k]!]!);
+    }
+  }
+}
+
 /** Open fraction of the slow channel at steady state for voltage v. */
 export function slowOpen(v: number, half: number): number {
   return 1 / (1 + Math.exp(-(v - half) / SLOW_SLOPE));
@@ -127,6 +175,7 @@ export function slowOpen(v: number, half: number): number {
  * 1985) lose every synapse and gap junction, in and out, and their tonic drive.
  */
 export function buildNetwork(params: NeuronParams = DEFAULT_PARAMS, fit: Fit = UNFITTED, ablated: readonly number[] = []): Network {
+  if (fit.restRelease !== undefined && fit.restRelease !== params.restRelease) params = { ...params, restRelease: fit.restRelease };
   const n = connectome.cells.length;
   const { sectionsPerSynapse } = connectome;
   const dead = new Uint8Array(n);
@@ -142,7 +191,7 @@ export function buildNetwork(params: NeuronParams = DEFAULT_PARAMS, fit: Fit = U
       sign: e.sign,
       mix: e.sign === 0 ? fit.mix?.[chemKey(e.pre, e.post)] : undefined,
     })),
-    gap.map((e) => ({ a: e.a, b: e.b, synapses: (e.size / sectionsPerSynapse.gap) * gapScale(fit, e.a, e.b) })),
+    gap.map((e) => ({ a: e.a, b: e.b, synapses: (e.size / sectionsPerSynapse.gap) * gapScale(fit, e.a, e.b), rect: gapRect(fit, e.a, e.b) })),
     params,
   );
   net.bias.set(biasConductances(fit));
@@ -156,7 +205,11 @@ export function buildNetwork(params: NeuronParams = DEFAULT_PARAMS, fit: Fit = U
   }
   // A cell's release threshold is its own property: keep the intact worm's,
   // so ablating one cell does not quietly retune its neighbours.
-  if (ablated.length > 0) net.vTh.set(buildNetwork(params, fit).vTh);
+  if (ablated.length > 0) {
+    const intact = buildNetwork(params, fit);
+    net.vTh.set(intact.vTh);
+    net.vRest.set(intact.vRest);
+  }
   for (const sl of fit.slow ?? []) {
     for (let i = 0; i < n; i++) if (fitClass(connectome.cells[i]!) === sl.cls) net.slowHalf[i] = net.vTh[i]! + sl.half;
   }
@@ -171,7 +224,7 @@ export function buildNetwork(params: NeuronParams = DEFAULT_PARAMS, fit: Fit = U
 export function networkFromEdges(
   n: number,
   chemical: { pre: number; post: number; synapses: number; sign: number; mix?: number | undefined }[],
-  gap: { a: number; b: number; synapses: number }[],
+  gap: { a: number; b: number; synapses: number; rect?: number | undefined }[],
   params: NeuronParams = DEFAULT_PARAMS,
 ): Network {
   const eOf = (sign: number, mix = params.ambiguousMix) =>
@@ -185,10 +238,11 @@ export function networkFromEdges(
   const synG = Float64Array.from(syn, (e) => params.gSynPerSynapse * e.synapses);
   const synE = Float64Array.from(syn, (e) => eOf(e.sign, e.mix));
 
-  const pairs: [number, number, number][] = [];
+  const pairs: [number, number, number, number][] = [];
   for (const e of gap) {
     const g = params.gGapPerSynapse * e.synapses;
-    pairs.push([e.a, e.b, g], [e.b, e.a, g]);
+    const rect = e.rect ?? 0;
+    pairs.push([e.a, e.b, g, rect], [e.b, e.a, g, -rect]);
   }
   pairs.sort((p, q) => p[0] - q[0] || p[1] - q[1]);
   const gapStart = new Int32Array(n + 1);
@@ -196,6 +250,7 @@ export function networkFromEdges(
   for (let i = 0; i < n; i++) gapStart[i + 1]! += gapStart[i]!;
   const gapOther = Int32Array.from(pairs, (p) => p[1]);
   const gapG = Float64Array.from(pairs, (p) => p[2]);
+  const gapRect = Float64Array.from(pairs, (p) => p[3]);
 
   const net: Network = {
     n,
@@ -207,24 +262,44 @@ export function networkFromEdges(
     gapStart,
     gapOther,
     gapG,
+    gapRect,
+    rectifying: gapRect.some((r) => r !== 0),
     vTh: new Float64Array(n),
+    vRest: new Float64Array(n),
     bias: new Float64Array(n),
     slowG: new Float64Array(n),
     slowHalf: new Float64Array(n),
     slowTau: new Float64Array(n).fill(1),
   };
 
-  // Equilibrium with s = 1/2 everywhere: a linear system in V (no capacitance term).
-  const half = new Float64Array(n).fill(0.5);
+  // Equilibrium with every cell releasing s0: a linear system in V (no
+  // capacitance term). The threshold then sits where the release curve gives s0.
+  const s0 = params.restRelease;
+  const rest = new Float64Array(n).fill(s0);
   const v = new Float64Array(n).fill(params.eLeak);
-  solveImplicit(net, half, 0, v, (i) => params.gLeak * params.eLeak + halfDrive(net, i), v);
-  net.vTh.set(v);
+  const restRhs = (i: number) => params.gLeak * params.eLeak + restDrive(net, i, s0);
+  solveImplicit(net, rest, 0, v, restRhs, v);
+  // Rectifying junctions depend on V: iterate to the fixed point (a few passes).
+  if (net.rectifying) {
+    const gEff = new Float64Array(net.gapG.length);
+    for (let pass = 0; pass < 50; pass++) {
+      gapConductances(net, v, gEff);
+      const before = Float64Array.from(v);
+      solveImplicit(net, rest, 0, v, restRhs, v, undefined, gEff);
+      let moved = 0;
+      for (let i = 0; i < n; i++) moved = Math.max(moved, Math.abs(v[i]! - before[i]!));
+      if (moved < 1e-9) break;
+    }
+  }
+  net.vRest.set(v);
+  const shift = Math.log(1 / s0 - 1) / params.beta;
+  for (let i = 0; i < n; i++) net.vTh[i] = v[i]! + shift;
   return net;
 }
 
-function halfDrive(net: Network, i: number): number {
+function restDrive(net: Network, i: number, s0: number): number {
   let b = 0;
-  for (let k = net.synStart[i]!; k < net.synStart[i + 1]!; k++) b += 0.5 * net.synG[k]! * net.synE[k]!;
+  for (let k = net.synStart[i]!; k < net.synStart[i + 1]!; k++) b += s0 * net.synG[k]! * net.synE[k]!;
   return b;
 }
 
@@ -251,10 +326,10 @@ export interface NeuronState {
 }
 
 export function createNeuronState(net: Network): NeuronState {
-  // V = V_th everywhere is the network's resting state: every synapse is then
-  // half open, which is exactly the equilibrium V_th was solved for.
-  const slow = Float64Array.from(net.vTh, (v, i) => (net.slowG[i]! > 0 ? slowOpen(v, net.slowHalf[i]!) : 0));
-  return { v: Float64Array.from(net.vTh), inject: new Float64Array(net.n), sense: new Float64Array(net.n), slow };
+  // V = V_rest everywhere is the network's resting state: every cell then
+  // releases restRelease, which is exactly the equilibrium V_rest was solved for.
+  const slow = Float64Array.from(net.vRest, (v, i) => (net.slowG[i]! > 0 ? slowOpen(v, net.slowHalf[i]!) : 0));
+  return { v: Float64Array.from(net.vRest), inject: new Float64Array(net.n), sense: new Float64Array(net.n), slow };
 }
 
 /**
@@ -287,7 +362,13 @@ export function stepNeurons(net: Network, state: NeuronState, dt: number, rng?: 
     return b;
   };
   const v = Float64Array.from(v0);
-  solveImplicit(net, s, cdt, v, rhs, v, tonic);
+  // Rectifying junctions are set from the start of the step, like s.
+  let gEff: Float64Array | undefined;
+  if (net.rectifying) {
+    gEff = new Float64Array(net.gapG.length);
+    gapConductances(net, v0, gEff);
+  }
+  solveImplicit(net, s, cdt, v, rhs, v, tonic, gEff);
   state.v.set(v);
   // Slow channel gating relaxes towards its open fraction at the new voltage (exact for fixed V).
   if (state.slow) {
@@ -312,6 +393,7 @@ function solveImplicit(
   rhsOf: (i: number) => number,
   out: Float64Array,
   extra?: Float64Array,
+  gapG: Float64Array = net.gapG,
 ): void {
   const { n, params } = net;
   const diag = new Float64Array(n);
@@ -319,14 +401,14 @@ function solveImplicit(
   for (let i = 0; i < n; i++) {
     let d = cdt + params.gLeak + (extra?.[i] ?? 0);
     for (let k = net.synStart[i]!; k < net.synStart[i + 1]!; k++) d += net.synG[k]! * s[net.synPre[k]!]!;
-    for (let k = net.gapStart[i]!; k < net.gapStart[i + 1]!; k++) d += net.gapG[k]!;
+    for (let k = net.gapStart[i]!; k < net.gapStart[i + 1]!; k++) d += gapG[k]!;
     diag[i] = d;
     b[i] = rhsOf(i);
   }
   const apply = (x: Float64Array, y: Float64Array) => {
     for (let i = 0; i < n; i++) {
       let acc = diag[i]! * x[i]!;
-      for (let k = net.gapStart[i]!; k < net.gapStart[i + 1]!; k++) acc -= net.gapG[k]! * x[net.gapOther[k]!]!;
+      for (let k = net.gapStart[i]!; k < net.gapStart[i + 1]!; k++) acc -= gapG[k]! * x[net.gapOther[k]!]!;
       y[i] = acc;
     }
   };

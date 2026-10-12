@@ -14,7 +14,7 @@
  * The fit is free to move every one of these.
  */
 import { connectome } from '../../src/sim/connectome';
-import { chemKey, fitClass, gapKey, type Fit } from '../../src/sim/fit';
+import { MEASURED_RECT, chemKey, fitClass, gapKey, type Fit } from '../../src/sim/fit';
 
 export const MOTOR = ['DB', 'VB', 'DA', 'VA', 'DD', 'VD', 'AS', 'AVB', 'AVA', 'AVD', 'AVE', 'PVC', 'SMD', 'RMD', 'SMB', 'RME', 'BWM'];
 export const PROPRIO = ['DB', 'VB', 'DA', 'VA', 'SMD'];
@@ -24,12 +24,18 @@ export const PROPRIO = ['DB', 'VB', 'DA', 'VA', 'SMD'];
  * RMD (RMD has plateau potentials, Mellem et al. 2008 ≈).
  */
 export const SLOW = ['DB', 'VB', 'DA', 'VA', 'SMD', 'RMD'];
+// The touch task also gives the command interneurons one (M4b): a touch lasts
+// 100 ms but a reversal seconds, and the graded network forgets within
+// milliseconds. AVA and AVB switch between long-lasting high and low states in
+// whole-brain imaging (Kato et al. 2015 ≈; modelled as bistable by Roberts et al. 2016 ≈).
 /**
  * The touch circuit added for M4 (Chalfie et al. 1985 ≈; DESIGN.md 5.1, 8.2):
  * the six touch receptors, DVA and LUA (PLM's partners) and RIM (coupled to
  * AVA during reversals, Kato et al. 2015 ≈).
  */
 export const TOUCH = ['ALM', 'AVM', 'PLM', 'PVM', 'DVA', 'LUA', 'RIM'];
+/** The six gentle-touch receptor neurons' classes. */
+const RECEPTORS = ['ALM', 'AVM', 'PLM', 'PVM'];
 export type Task = 'gait' | 'bio' | 'steer' | 'touch';
 /**
  * Command interneurons: hubs with hundreds of inputs from outside the motor
@@ -63,12 +69,20 @@ export interface Space {
   slow: string[];
   /** Circuit class pairs with ambiguous edges whose excitatory share is fitted. */
   mixKeys: string[];
+  /**
+   * Gap class pairs whose rectification is fitted (touch task: the command
+   * cells' and touch receptors' own pairs; DESIGN.md 4.6). The measured
+   * pairs (MEASURED_RECT) are fixed, not fitted.
+   */
+  rectKeys: string[];
+  /** Resting release every candidate is built with (DESIGN.md 4.2; not fitted). Absent: 0.5. */
+  restRelease?: number;
   /** What is fitted: the gait alone, or the gait and the touch responses. */
   task: Task;
 }
 
-export function buildSpace(proprio: string[] = PROPRIO, task: Task = 'gait'): Space {
-  const slow = task === 'gait' ? [] : SLOW;
+export function buildSpace(proprio: string[] = PROPRIO, task: Task = 'gait', restRelease?: number): Space {
+  const slow = task === 'gait' ? [] : task === 'touch' ? [...SLOW, ...COMMAND] : SLOW;
   const circuit = CIRCUIT[task];
   const inMotor = (i: number) => circuit.includes(fitClass(connectome.cells[i]!));
   const chem = new Map<string, number>();
@@ -84,14 +98,30 @@ export function buildSpace(proprio: string[] = PROPRIO, task: Task = 'gait'): Sp
     gap.set(k, (gap.get(k) ?? 0) + e.size);
   }
   const sorted = (m: Map<string, number>) => [...m.keys()].sort();
-  const chemKeys = sorted(chem).filter((k) => chem.get(k)! >= MIN_SECTIONS);
-  const gapKeys = sorted(gap).filter((k) => gap.get(k)! >= MIN_SECTIONS);
-  const smallChem = sorted(chem).filter((k) => chem.get(k)! < MIN_SECTIONS);
-  const smallGap = sorted(gap).filter((k) => gap.get(k)! < MIN_SECTIONS);
+  // Small class pairs share one strength, except a touch receptor's own
+  // outputs: the touch pathway (ALM, AVM → AVD; Chalfie et al. 1985 ≈) runs
+  // through few synapses, and pooled with every other small pair it could not
+  // be scaled at all.
+  const own = (k: string) => RECEPTORS.some((r) => k.startsWith(`${r}>`) || k.startsWith(`${r}~`) || k.endsWith(`~${r}`));
+  const big = (m: Map<string, number>, k: string) => m.get(k)! >= MIN_SECTIONS || (task === 'touch' && own(k));
+  const chemKeys = sorted(chem).filter((k) => big(chem, k));
+  const gapKeys = sorted(gap).filter((k) => big(gap, k));
+  const smallChem = sorted(chem).filter((k) => !big(chem, k));
+  const smallGap = sorted(gap).filter((k) => !big(gap, k));
   // Ambiguous signs (DESIGN.md 3.2) are fitted per class pair outside the gait task.
   const ambiguous = new Set<string>();
   for (const e of connectome.chemical) if (e.sign === 0 && inMotor(e.pre) && inMotor(e.post)) ambiguous.add(chemKey(e.pre, e.post));
   const mixKeys = task === 'gait' ? [] : chemKeys.filter((k) => ambiguous.has(k));
+  // Rectification (DESIGN.md 4.6) is fitted on the touch path only: the
+  // command cells' and receptors' own junctions between two different classes.
+  const touchPath = [...COMMAND, ...RECEPTORS];
+  const rectKeys =
+    task === 'touch'
+      ? gapKeys.filter((k) => {
+          const [a, b] = k.split('~');
+          return a !== b && (touchPath.includes(a!) || touchPath.includes(b!)) && !(k in MEASURED_RECT);
+        })
+      : [];
   const otherChem = new Map<string, string[]>();
   const otherGap = new Map<string, string[]>();
   if (task !== 'gait') {
@@ -128,13 +158,14 @@ export function buildSpace(proprio: string[] = PROPRIO, task: Task = 'gait'): Sp
       { name: `extent:${c}`, centre: 0.15, scale: 0.1, lo: 0, hi: 0.6 },
     ]),
     ...mixKeys.map((k) => ({ name: `mix:${k}`, centre: 0.5, scale: 0.2, lo: 0, hi: 1 })),
+    ...rectKeys.map((k) => ({ name: `rect:${k}`, centre: 0, scale: 0.4, lo: -1, hi: 1 })),
     ...slow.flatMap((c) => [
       { name: `slowg:${c}`, centre: 2, scale: 1, lo: 0, hi: 10 },
       { name: `slowhalf:${c}`, centre: 0, scale: 3, lo: -20, hi: 20 },
       { name: `slowtau:${c}`, centre: 50, scale: 30, lo: 5, hi: 500 },
     ]),
   ];
-  return { dims, chemKeys, gapKeys, mixKeys, smallChem, smallGap, otherChem, otherGap, proprio, slow, task };
+  return { dims, chemKeys, gapKeys, mixKeys, rectKeys, smallChem, smallGap, otherChem, otherGap, proprio, slow, task, ...(restRelease === undefined ? {} : { restRelease }) };
 }
 
 /**
@@ -164,7 +195,7 @@ export function value(d: Dim, x: number): number {
 }
 
 export function toFit(space: Space, x: ArrayLike<number>, name: string): Fit {
-  const fit: Fit = { name, chem: {}, gap: {}, bias: {}, proprio: [] };
+  const fit: Fit = { name, chem: {}, gap: {}, bias: {}, proprio: [], ...(space.restRelease === undefined ? {} : { restRelease: space.restRelease }) };
   const v = new Map(space.dims.map((d, i) => [d.name, value(d, x[i]!)]));
   for (const k of space.chemKeys) fit.chem[k] = v.get(`chem:${k}`)!;
   for (const k of space.smallChem) fit.chem[k] = v.get('chem:small')!;
@@ -181,19 +212,34 @@ export function toFit(space: Space, x: ArrayLike<number>, name: string): Fit {
     fit.proprio.push({ cls: c, gain: v.get(`gain:${c}`)!, offset, extent });
   }
   if (space.mixKeys.length) fit.mix = Object.fromEntries(space.mixKeys.map((k) => [k, v.get(`mix:${k}`)!]));
+  if (space.task === 'touch') fit.rect = { ...MEASURED_RECT, ...Object.fromEntries(space.rectKeys.map((k) => [k, v.get(`rect:${k}`)!])) };
   if (space.slow.length) {
     fit.slow = space.slow.map((c) => ({ cls: c, g: v.get(`slowg:${c}`)!, half: v.get(`slowhalf:${c}`)!, tau: v.get(`slowtau:${c}`)! }));
   }
   return fit;
 }
 
+/**
+ * The shared value of a pooled dimension in a saved fit: the most common
+ * value among its keys. A fit from a smaller circuit pools different keys, so
+ * the first key alone may be one it fitted on its own.
+ */
+function pooled(values: (number | undefined)[]): number {
+  const counts = new Map<number, number>();
+  for (const x of values) if (x !== undefined) counts.set(x, (counts.get(x) ?? 0) + 1);
+  let best = 0;
+  let most = 0;
+  for (const [x, c] of [...counts].sort((a, b) => a[0] - b[0])) if (c > most) [best, most] = [x, c];
+  return best;
+}
+
 /** Search coordinates of a fit (the inverse of toFit), to continue a search from it. */
 export function fromFit(space: Space, fit: Fit): Float64Array {
   const v = new Map<string, number>();
   for (const k of space.chemKeys) v.set(`chem:${k}`, fit.chem[k] ?? 0);
-  v.set('chem:small', space.smallChem.length ? (fit.chem[space.smallChem[0]!] ?? 0) : 0);
+  v.set('chem:small', pooled(space.smallChem.map((k) => fit.chem[k])));
   for (const k of space.gapKeys) v.set(`gap:${k}`, fit.gap[k] ?? 0);
-  v.set('gap:small', space.smallGap.length ? (fit.gap[space.smallGap[0]!] ?? 0) : 0);
+  v.set('gap:small', pooled(space.smallGap.map((k) => fit.gap[k])));
   for (const [c, keys] of space.otherChem) v.set(`chem:other>${c}`, fit.chem[keys[0]!] ?? 0);
   for (const [c, keys] of space.otherGap) v.set(`gap:other~${c}`, fit.gap[keys[0]!] ?? 0);
   for (const [c, b] of Object.entries(fit.bias)) v.set(`bias:${c}`, b);
@@ -203,6 +249,7 @@ export function fromFit(space: Space, fit: Fit): Float64Array {
     v.set(`extent:${r.cls}`, r.extent);
   }
   for (const [k, m] of Object.entries(fit.mix ?? {})) v.set(`mix:${k}`, m);
+  for (const [k, r] of Object.entries(fit.rect ?? {})) v.set(`rect:${k}`, r);
   for (const r of fit.slow ?? []) {
     v.set(`slowg:${r.cls}`, r.g);
     v.set(`slowhalf:${r.cls}`, r.half);

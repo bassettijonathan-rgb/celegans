@@ -1,10 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { cellIndex } from '../src/sim/connectome';
+import { cellIndex, connectome } from '../src/sim/connectome';
+import { MEASURED_RECT, UNFITTED } from '../src/sim/fit';
+
+const nameOf = (i: number) => connectome.cells[i]!.name;
 import {
   DEFAULT_PARAMS,
   buildNetwork,
   createNeuronState,
+  gapOpen,
   networkFromEdges,
+  release,
   stepNeurons,
   type NeuronState,
 } from '../src/sim/neurons';
@@ -56,6 +61,57 @@ describe('gap junctions', () => {
     stepNeurons(net, st, 1);
     expect(st.v[0]! - st.v[1]!).toBeGreaterThan(0);
     expect(st.v[0]! - st.v[1]!).toBeLessThan(0.1);
+  });
+});
+
+describe('rectifying gap junctions (DESIGN.md 4.6)', () => {
+  const settle = (rect: number, into: 0 | 1) => {
+    const net = networkFromEdges(2, [], [{ a: 0, b: 1, synapses: 1, rect }]);
+    const st: NeuronState = { v: Float64Array.of(P.eLeak, P.eLeak), inject: new Float64Array(2) };
+    st.inject[into] = 0.5;
+    run(net, st, 3000);
+    return [st.v[0]! - P.eLeak, st.v[1]! - P.eLeak] as const;
+  };
+
+  it('pass current one way only when fully rectifying', () => {
+    // Current a → b allowed: depolarising a reaches b nearly as through an
+    // ohmic junction (the junction half shuts only where a and b are within
+    // a few mV, RECT_SLOPE).
+    const ohmic = settle(0, 0);
+    const forward = settle(1, 0);
+    expect(forward[1]).toBeGreaterThan(0.85 * ohmic[1]);
+    // Depolarising b barely reaches a, and b keeps nearly the voltage of an uncoupled cell.
+    const back = settle(1, 1);
+    expect(back[0]).toBeLessThan(0.2 * ohmic[1]);
+    expect(back[1]).toBeGreaterThan(0.9 * (0.5 / P.gLeak));
+  });
+
+  it('are the same junction seen from either side, so the solver stays symmetric', () => {
+    for (const rho of [-1, -0.4, 0, 0.7, 1]) {
+      for (const dv of [-10, -1, 0, 2, 15]) expect(gapOpen(rho, dv)).toBeCloseTo(gapOpen(-rho, -dv), 12);
+    }
+    expect(gapOpen(1, 20)).toBeGreaterThan(0.99);
+    expect(gapOpen(1, -20)).toBeLessThan(0.01);
+    expect(gapOpen(0.5, -20)).toBeCloseTo(0.5, 2);
+  });
+
+  it('come from the fit, oriented by class pair key, with AVA–A measured one-way into AVA', () => {
+    const fit = { ...UNFITTED, rect: { ...MEASURED_RECT } };
+    const net = buildNetwork(P, fit);
+    const ava = cellIndex('AVAL');
+    let seen = 0;
+    for (let k = net.gapStart[ava]!; k < net.gapStart[ava + 1]!; k++) {
+      const other = net.gapOther[k]!;
+      if (/^(DA|VA)\d/.test(other === undefined ? '' : nameOf(other))) {
+        // Entry (AVA, A cell): passes current from the A cell into AVA, so negative.
+        expect(net.gapRect[k]).toBe(-1);
+        seen++;
+      }
+    }
+    expect(seen).toBeGreaterThan(0);
+    expect(net.rectifying).toBe(true);
+    // Unfitted networks have no rectifying junctions.
+    expect(buildNetwork(P).rectifying).toBe(false);
   });
 });
 
@@ -238,5 +294,26 @@ describe('fitted signs of ambiguous synapses (DESIGN.md 3.2)', () => {
     for (let k = plain.synStart[ava]!; k < plain.synStart[ava + 1]!; k++) {
       if (plain.synPre[k] === avd) expect(plain.synE[k]).toBe(P.eInh + P.ambiguousMix * (P.eExc - P.eInh));
     }
+  });
+});
+
+describe('resting release (DESIGN.md 4.2, M4b)', () => {
+  it('puts every cell at rest releasing restRelease, and the network stays there', () => {
+    const net = buildNetwork({ ...P, restRelease: 0.1 });
+    const st = createNeuronState(net);
+    const s = new Float64Array(net.n);
+    release(net, st.v, s);
+    for (let i = 0; i < net.n; i++) expect(s[i]).toBeCloseTo(0.1, 9);
+    for (let t = 0; t < 200; t++) stepNeurons(net, st, 1);
+    for (let i = 0; i < net.n; i++) expect(Math.abs(st.v[i]! - net.vRest[i]!)).toBeLessThan(1e-6);
+  });
+
+  it('is Kunert 2014’s half-open rule by default, and a fit can lower it', () => {
+    const half = buildNetwork(P);
+    expect(half.vTh).toEqual(half.vRest);
+    const quiet = buildNetwork(P, { name: 't', chem: {}, gap: {}, bias: {}, proprio: [], restRelease: 0.1 });
+    expect(quiet.params.restRelease).toBe(0.1);
+    const ava = cellIndex('AVAL');
+    expect(quiet.vTh[ava]! - quiet.vRest[ava]!).toBeCloseTo(Math.log(9) / P.beta, 9);
   });
 });
