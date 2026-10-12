@@ -580,6 +580,22 @@ marked as a known failure.
   crawl this way add a rhythm source: bistable B motor neurons (Boyle, Berri & Cohen 2012 ≈) or
   oscillators in the head and along the cord (Fouad et al. 2018 ≈; Xu et al. 2018 ≈ for A cells).
   Our neuron model (section 4) has neither, so this needs a model change, not more fitting.
+- **With a rhythm source, the real-way gait works (2026-10-12).** Adding the slow channel (section
+  4.5) and requiring B cells to read at least 5% of the body ahead of them, a gait-only fit and then
+  a steering fit (`steer-bio-19`) found a gait where the head (SMD, RMD, with their slow channels)
+  makes the rhythm and B cells pass each bend back, every neuron under the input-conductance cap:
+  crawling 0.5 Hz (λ 0.73, κL 2.0), swimming 1.5 Hz (λ 1.22, κL 4.0). Lighting AVA (2 nS) makes the
+  worm back up at 0.084 to 0.089 mm/s in 3 of 4 seeds (target 0.08; Guo et al. 2009 ≈) and crawl
+  forward again after the light. The fit put B cells' own slow channels at zero: the rhythm is the
+  head's, as Fouad et al. 2018 ≈ suggest for forward crawling. `npm run steer` checks it.
+- **Touch still cannot reach AVA.** Touching the nose depolarises ALM and AVM by about 10 mV but AVD
+  and AVA by under 1 mV, and anterior and posterior touches change the gait identically (by
+  nothing). Fitting the signs of ambiguous synapses (section 3.2; AVD→AVA was left half way, so
+  AVD could not excite AVA) and strengthening the ALM/AVM → AVD path by hand did not help. The cause
+  is the model's resting state (section 4.2): every synapse is half open at rest, so AVD, AVA and
+  AVB each sit on 17 to 50 nS of synapses from dozens of partners, and a receptor's input is a
+  sliver of that. In the real worm most of those partners are quiet at rest. Fixing this means
+  changing how release thresholds are set, a model change.
 - **What works:** a tail touch speeds the worm up (0.04 → 0.12 mm/s, V2b) in the capped touch fit.
 
 Honest expectations: V1 and V2 should pass. V3b and V4b are the hardest; V4b may come out only
