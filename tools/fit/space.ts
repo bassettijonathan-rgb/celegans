@@ -34,6 +34,8 @@ export const SLOW = ['DB', 'VB', 'DA', 'VA', 'SMD', 'RMD'];
  * AVA during reversals, Kato et al. 2015 ≈).
  */
 export const TOUCH = ['ALM', 'AVM', 'PLM', 'PVM', 'DVA', 'LUA', 'RIM'];
+/** The six gentle-touch receptor neurons' classes. */
+const RECEPTORS = ['ALM', 'AVM', 'PLM', 'PVM'];
 export type Task = 'gait' | 'bio' | 'steer' | 'touch';
 /**
  * Command interneurons: hubs with hundreds of inputs from outside the motor
@@ -90,10 +92,16 @@ export function buildSpace(proprio: string[] = PROPRIO, task: Task = 'gait', res
     gap.set(k, (gap.get(k) ?? 0) + e.size);
   }
   const sorted = (m: Map<string, number>) => [...m.keys()].sort();
-  const chemKeys = sorted(chem).filter((k) => chem.get(k)! >= MIN_SECTIONS);
-  const gapKeys = sorted(gap).filter((k) => gap.get(k)! >= MIN_SECTIONS);
-  const smallChem = sorted(chem).filter((k) => chem.get(k)! < MIN_SECTIONS);
-  const smallGap = sorted(gap).filter((k) => gap.get(k)! < MIN_SECTIONS);
+  // Small class pairs share one strength, except a touch receptor's own
+  // outputs: the touch pathway (ALM, AVM → AVD; Chalfie et al. 1985 ≈) runs
+  // through few synapses, and pooled with every other small pair it could not
+  // be scaled at all.
+  const own = (k: string) => RECEPTORS.some((r) => k.startsWith(`${r}>`) || k.startsWith(`${r}~`) || k.endsWith(`~${r}`));
+  const big = (m: Map<string, number>, k: string) => m.get(k)! >= MIN_SECTIONS || (task === 'touch' && own(k));
+  const chemKeys = sorted(chem).filter((k) => big(chem, k));
+  const gapKeys = sorted(gap).filter((k) => big(gap, k));
+  const smallChem = sorted(chem).filter((k) => !big(chem, k));
+  const smallGap = sorted(gap).filter((k) => !big(gap, k));
   // Ambiguous signs (DESIGN.md 3.2) are fitted per class pair outside the gait task.
   const ambiguous = new Set<string>();
   for (const e of connectome.chemical) if (e.sign === 0 && inMotor(e.pre) && inMotor(e.post)) ambiguous.add(chemKey(e.pre, e.post));
