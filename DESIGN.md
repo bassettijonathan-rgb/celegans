@@ -553,6 +553,15 @@ marked as a known failure.
   at best: backing up at 0.05 mm/s (target 0.08) and crawling forward again after the light, but
   crawling at only 0.2 Hz and 0.015 mm/s and swimming at 1.3 Hz. No generation in the next 100
   improved on that; later ones either steered or crawled, not both.
+- **B-cell stretch alone makes no crawl (2026-10-12).** Redoing the gait the biological way
+  (B cells read the bend ahead and drive forward; A cells read the bend behind and drive backward;
+  the cap kept), a sweep of B stretch gain (−15 to 30 nS), field offset (0.05 to 0.4 body ahead) and
+  length (0.05 to 0.3) found no crawl on agar anywhere, and only a weak swim in water (κL ≤ 1.3,
+  target ≥ 3). A fit from the best point stayed flat. With graded neurons, a stretch reflex
+  passes a bend backwards but nothing makes the bend in the first place. Published models that
+  crawl this way add a rhythm source: bistable B motor neurons (Boyle, Berri & Cohen 2012 ≈) or
+  oscillators in the head and along the cord (Fouad et al. 2018 ≈; Xu et al. 2018 ≈ for A cells).
+  Our neuron model (section 4) has neither, so this needs a model change, not more fitting.
 - **What works:** a tail touch speeds the worm up (0.04 → 0.12 mm/s, V2b) in the capped touch fit.
 
 Honest expectations: V1 and V2 should pass. V3b and V4b are the hardest; V4b may come out only
