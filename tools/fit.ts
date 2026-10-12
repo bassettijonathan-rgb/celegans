@@ -7,7 +7,8 @@
  *     [--from fit.json --sigma 0.3 --name gait-3b]   continue from a saved fit
  *     [--proprio DB,VB,SMD]   which classes get fitted stretch feedback (default all in space.ts)
  *     [--task touch]   also fit the touch responses (V2a, V2b, V4a) over the touch circuit
- *     [--task steer]   also fit backing up while AVA is lit (optogenetics)
+ *     [--task bio]     gait only, with B cells sensing ahead, A behind, and slow channels (DESIGN.md 4.5)
+ *     [--task steer]   as bio, and also fit backing up while AVA is lit (optogenetics)
  *
  * Deterministic for a given seed and worker count does not matter: each
  * candidate is scored independently.
@@ -33,7 +34,7 @@ mkdirSync(out, { recursive: true });
 
 const proprioIdx = args.indexOf('--proprio');
 const taskIdx = args.indexOf('--task');
-const task: Task = taskIdx >= 0 && (args[taskIdx + 1] === 'touch' || args[taskIdx + 1] === 'steer') ? (args[taskIdx + 1] as Task) : 'gait';
+const task: Task = taskIdx >= 0 && ['touch', 'steer', 'bio'].includes(args[taskIdx + 1]!) ? (args[taskIdx + 1] as Task) : 'gait';
 const space = buildSpace(proprioIdx >= 0 ? args[proprioIdx + 1]!.split(',') : undefined, task);
 const n = space.dims.length;
 const rng = new Rng(seed, Purpose.sim);

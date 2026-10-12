@@ -18,15 +18,19 @@ import { chemKey, fitClass, gapKey, type Fit } from '../../src/sim/fit';
 
 export const MOTOR = ['DB', 'VB', 'DA', 'VA', 'DD', 'VD', 'AS', 'AVB', 'AVA', 'AVD', 'AVE', 'PVC', 'SMD', 'RMD', 'SMB', 'RME', 'BWM'];
 export const PROPRIO = ['DB', 'VB', 'DA', 'VA', 'SMD'];
-/** Classes given a slow inward channel in steer and touch fits (DESIGN.md section 4.5): the A and B motor neurons. */
-export const SLOW = ['DB', 'VB', 'DA', 'VA'];
+/**
+ * Classes given a slow inward channel outside the gait task (DESIGN.md
+ * section 4.5): the A and B motor neurons, and the head motor neurons SMD and
+ * RMD (RMD has plateau potentials, Mellem et al. 2008 ≈).
+ */
+export const SLOW = ['DB', 'VB', 'DA', 'VA', 'SMD', 'RMD'];
 /**
  * The touch circuit added for M4 (Chalfie et al. 1985 ≈; DESIGN.md 5.1, 8.2):
  * the six touch receptors, DVA and LUA (PLM's partners) and RIM (coupled to
  * AVA during reversals, Kato et al. 2015 ≈).
  */
 export const TOUCH = ['ALM', 'AVM', 'PLM', 'PVM', 'DVA', 'LUA', 'RIM'];
-export type Task = 'gait' | 'steer' | 'touch';
+export type Task = 'gait' | 'bio' | 'steer' | 'touch';
 /**
  * Command interneurons: hubs with hundreds of inputs from outside the motor
  * and touch circuits. With every synapse at the same default strength, those
@@ -34,7 +38,7 @@ export type Task = 'gait' | 'steer' | 'touch';
  * scales each hub's outside inputs together, one number per hub and kind.
  */
 export const COMMAND = ['AVA', 'AVB', 'AVD', 'AVE', 'PVC'];
-export const CIRCUIT: Record<Task, string[]> = { gait: MOTOR, steer: MOTOR, touch: [...MOTOR, ...TOUCH] };
+export const CIRCUIT: Record<Task, string[]> = { gait: MOTOR, bio: MOTOR, steer: MOTOR, touch: [...MOTOR, ...TOUCH] };
 const MIN_SECTIONS = 10;
 
 export interface Dim {
@@ -128,7 +132,7 @@ export function buildSpace(proprio: string[] = PROPRIO, task: Task = 'gait'): Sp
 
 /**
  * Where a stretch-sensing class may read the body. For the gait task
- * anywhere within half a body length. For steer and touch the fit follows
+ * anywhere within half a body length. Otherwise the fit follows
  * the biology (Wen et al. 2012; Xu et al. 2018 ≈): B cells, which drive
  * forward crawling, read the bend ahead of them (towards the head); A cells,
  * which drive backing up, read the bend behind them.
