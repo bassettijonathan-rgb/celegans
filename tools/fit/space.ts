@@ -189,13 +189,27 @@ export function toFit(space: Space, x: ArrayLike<number>, name: string): Fit {
   return fit;
 }
 
+/**
+ * The shared value of a pooled dimension in a saved fit: the most common
+ * value among its keys. A fit from a smaller circuit pools different keys, so
+ * the first key alone may be one it fitted on its own.
+ */
+function pooled(values: (number | undefined)[]): number {
+  const counts = new Map<number, number>();
+  for (const x of values) if (x !== undefined) counts.set(x, (counts.get(x) ?? 0) + 1);
+  let best = 0;
+  let most = 0;
+  for (const [x, c] of [...counts].sort((a, b) => a[0] - b[0])) if (c > most) [best, most] = [x, c];
+  return best;
+}
+
 /** Search coordinates of a fit (the inverse of toFit), to continue a search from it. */
 export function fromFit(space: Space, fit: Fit): Float64Array {
   const v = new Map<string, number>();
   for (const k of space.chemKeys) v.set(`chem:${k}`, fit.chem[k] ?? 0);
-  v.set('chem:small', space.smallChem.length ? (fit.chem[space.smallChem[0]!] ?? 0) : 0);
+  v.set('chem:small', pooled(space.smallChem.map((k) => fit.chem[k])));
   for (const k of space.gapKeys) v.set(`gap:${k}`, fit.gap[k] ?? 0);
-  v.set('gap:small', space.smallGap.length ? (fit.gap[space.smallGap[0]!] ?? 0) : 0);
+  v.set('gap:small', pooled(space.smallGap.map((k) => fit.gap[k])));
   for (const [c, keys] of space.otherChem) v.set(`chem:other>${c}`, fit.chem[keys[0]!] ?? 0);
   for (const [c, keys] of space.otherGap) v.set(`gap:other~${c}`, fit.gap[keys[0]!] ?? 0);
   for (const [c, b] of Object.entries(fit.bias)) v.set(`bias:${c}`, b);

@@ -133,3 +133,18 @@ describe('biological stretch fields (bio, steer and touch fits)', () => {
     }
   });
 });
+
+describe('continuing a fit in a larger circuit', () => {
+  it('keeps every strength the smaller fit set on its own, and its pooled small-edge strength', async () => {
+    const { buildSpace, toFit, fromFit } = await import('../tools/fit/space');
+    const bio = buildSpace(undefined, 'bio');
+    const x = Float64Array.from(bio.dims, (_, i) => Math.sin(i));
+    const small = toFit(bio, x, 'bio');
+    const touch = buildSpace(undefined, 'touch');
+    const big = toFit(touch, fromFit(touch, small), 'touch');
+    for (const k of bio.chemKeys.filter((k) => touch.chemKeys.includes(k))) expect(big.chem[k]).toBeCloseTo(small.chem[k]!, 9);
+    const pooledBefore = small.chem[bio.smallChem[0]!]!;
+    const stillSmall = bio.smallChem.filter((k) => touch.smallChem.includes(k));
+    for (const k of stillSmall) expect(big.chem[k]).toBeCloseTo(pooledBefore, 9);
+  });
+});
