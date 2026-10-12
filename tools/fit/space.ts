@@ -110,11 +110,24 @@ export function buildSpace(proprio: string[] = PROPRIO, task: Task = 'gait'): Sp
     ...circuit.filter((c) => c !== 'BWM').map((c) => ({ name: `bias:${c}`, centre: 0, scale: 0.3, lo: -3, hi: 3 })),
     ...proprio.flatMap((c) => [
       { name: `gain:${c}`, centre: c === 'DB' || c === 'VB' ? -3 : 0, scale: 2, lo: -30, hi: 30 },
-      { name: `offset:${c}`, centre: -0.15, scale: 0.1, lo: -0.5, hi: 0.5 },
+      { name: `offset:${c}`, ...offsetRange(c, task) },
       { name: `extent:${c}`, centre: 0.15, scale: 0.1, lo: 0, hi: 0.6 },
     ]),
   ];
   return { dims, chemKeys, gapKeys, smallChem, smallGap, otherChem, otherGap, proprio, task };
+}
+
+/**
+ * Where a stretch-sensing class may read the body. For the gait task
+ * anywhere within half a body length. For steer and touch the fit follows
+ * the biology (Wen et al. 2012; Xu et al. 2018 ≈): B cells, which drive
+ * forward crawling, read the bend ahead of them (towards the head); A cells,
+ * which drive backing up, read the bend behind them.
+ */
+function offsetRange(c: string, task: Task): { centre: number; scale: number; lo: number; hi: number } {
+  if (task !== 'gait' && (c === 'DB' || c === 'VB')) return { centre: -0.15, scale: 0.1, lo: -0.5, hi: 0 };
+  if (task !== 'gait' && (c === 'DA' || c === 'VA')) return { centre: 0.05, scale: 0.1, lo: 0, hi: 0.5 };
+  return { centre: -0.15, scale: 0.1, lo: -0.5, hi: 0.5 };
 }
 
 /** Parameter value of dimension d for search coordinate x (unit-scaled, clamped to the range). */
