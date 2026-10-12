@@ -219,3 +219,24 @@ describe('slow inward channel (DESIGN.md section 4.5)', () => {
     expect(buildNetwork(P, fit, [vb]).slowG[vb]).toBe(0);
   });
 });
+
+describe('fitted signs of ambiguous synapses (DESIGN.md 3.2)', () => {
+  it('sets the reversal of every ambiguous edge in a class pair from the fitted excitatory share', () => {
+    const net = buildNetwork(P, { name: 't', chem: {}, gap: {}, bias: {}, proprio: [], mix: { 'AVD>AVA': 1 } });
+    const ava = cellIndex('AVAL');
+    const avd = cellIndex('AVDL');
+    let found = 0;
+    for (let k = net.synStart[ava]!; k < net.synStart[ava + 1]!; k++) {
+      if (net.synPre[k] === avd) {
+        expect(net.synE[k]).toBe(P.eExc);
+        found++;
+      }
+    }
+    expect(found).toBe(1);
+    // Unfitted, the same edge sits half way between the reversals.
+    const plain = buildNetwork(P);
+    for (let k = plain.synStart[ava]!; k < plain.synStart[ava + 1]!; k++) {
+      if (plain.synPre[k] === avd) expect(plain.synE[k]).toBe(P.eInh + P.ambiguousMix * (P.eExc - P.eInh));
+    }
+  });
+});

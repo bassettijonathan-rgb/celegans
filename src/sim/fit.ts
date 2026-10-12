@@ -37,6 +37,12 @@ export interface Fit {
   chem: Record<string, number>;
   /** log10 strength scale per gap-junction class pair, keyed 'A~B' with A ≤ B. */
   gap: Record<string, number>;
+  /**
+   * Excitatory share (0 to 1) of `ambiguous` chemical edges per class pair,
+   * keyed like `chem` (DESIGN.md 3.2: fitted where transmitter and receptor
+   * data leave the sign open). Pairs not here use the neutral default.
+   */
+  mix?: Record<string, number>;
   /** Tonic current per class, pA: the drive the class gets from cells outside the model (peptides, upstream inputs). */
   bias: Record<string, number>;
   proprio: ProprioFit[];

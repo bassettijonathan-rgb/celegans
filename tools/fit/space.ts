@@ -61,6 +61,8 @@ export interface Space {
   /** Classes whose stretch feedback is fitted; the others have none. */
   proprio: string[];
   slow: string[];
+  /** Circuit class pairs with ambiguous edges whose excitatory share is fitted. */
+  mixKeys: string[];
   /** What is fitted: the gait alone, or the gait and the touch responses. */
   task: Task;
 }
@@ -86,6 +88,10 @@ export function buildSpace(proprio: string[] = PROPRIO, task: Task = 'gait'): Sp
   const gapKeys = sorted(gap).filter((k) => gap.get(k)! >= MIN_SECTIONS);
   const smallChem = sorted(chem).filter((k) => chem.get(k)! < MIN_SECTIONS);
   const smallGap = sorted(gap).filter((k) => gap.get(k)! < MIN_SECTIONS);
+  // Ambiguous signs (DESIGN.md 3.2) are fitted per class pair outside the gait task.
+  const ambiguous = new Set<string>();
+  for (const e of connectome.chemical) if (e.sign === 0 && inMotor(e.pre) && inMotor(e.post)) ambiguous.add(chemKey(e.pre, e.post));
+  const mixKeys = task === 'gait' ? [] : chemKeys.filter((k) => ambiguous.has(k));
   const otherChem = new Map<string, string[]>();
   const otherGap = new Map<string, string[]>();
   if (task !== 'gait') {
@@ -121,13 +127,14 @@ export function buildSpace(proprio: string[] = PROPRIO, task: Task = 'gait'): Sp
       { name: `offset:${c}`, ...offsetRange(c, task) },
       { name: `extent:${c}`, centre: 0.15, scale: 0.1, lo: 0, hi: 0.6 },
     ]),
+    ...mixKeys.map((k) => ({ name: `mix:${k}`, centre: 0.5, scale: 0.2, lo: 0, hi: 1 })),
     ...slow.flatMap((c) => [
       { name: `slowg:${c}`, centre: 2, scale: 1, lo: 0, hi: 10 },
       { name: `slowhalf:${c}`, centre: 0, scale: 3, lo: -20, hi: 20 },
       { name: `slowtau:${c}`, centre: 50, scale: 30, lo: 5, hi: 500 },
     ]),
   ];
-  return { dims, chemKeys, gapKeys, smallChem, smallGap, otherChem, otherGap, proprio, slow, task };
+  return { dims, chemKeys, gapKeys, mixKeys, smallChem, smallGap, otherChem, otherGap, proprio, slow, task };
 }
 
 /**
@@ -173,6 +180,7 @@ export function toFit(space: Space, x: ArrayLike<number>, name: string): Fit {
     if (space.task !== 'gait' && (c === 'DB' || c === 'VB')) extent = Math.min(extent, -offset);
     fit.proprio.push({ cls: c, gain: v.get(`gain:${c}`)!, offset, extent });
   }
+  if (space.mixKeys.length) fit.mix = Object.fromEntries(space.mixKeys.map((k) => [k, v.get(`mix:${k}`)!]));
   if (space.slow.length) {
     fit.slow = space.slow.map((c) => ({ cls: c, g: v.get(`slowg:${c}`)!, half: v.get(`slowhalf:${c}`)!, tau: v.get(`slowtau:${c}`)! }));
   }
@@ -194,6 +202,7 @@ export function fromFit(space: Space, fit: Fit): Float64Array {
     v.set(`offset:${r.cls}`, r.offset);
     v.set(`extent:${r.cls}`, r.extent);
   }
+  for (const [k, m] of Object.entries(fit.mix ?? {})) v.set(`mix:${k}`, m);
   for (const r of fit.slow ?? []) {
     v.set(`slowg:${r.cls}`, r.g);
     v.set(`slowhalf:${r.cls}`, r.half);

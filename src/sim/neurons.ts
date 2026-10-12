@@ -28,7 +28,7 @@
  * conductance-based cells arrive.
  */
 import { connectome } from './connectome';
-import { UNFITTED, biasConductances, chemScale, fitClass, gapScale, type Fit } from './fit';
+import { UNFITTED, biasConductances, chemKey, chemScale, fitClass, gapScale, type Fit } from './fit';
 import type { Rng } from './rng';
 
 /**
@@ -140,6 +140,7 @@ export function buildNetwork(params: NeuronParams = DEFAULT_PARAMS, fit: Fit = U
       post: e.post,
       synapses: (e.size / sectionsPerSynapse.chemical) * chemScale(fit, e.pre, e.post),
       sign: e.sign,
+      mix: e.sign === 0 ? fit.mix?.[chemKey(e.pre, e.post)] : undefined,
     })),
     gap.map((e) => ({ a: e.a, b: e.b, synapses: (e.size / sectionsPerSynapse.gap) * gapScale(fit, e.a, e.b) })),
     params,
@@ -169,12 +170,12 @@ export function buildNetwork(params: NeuronParams = DEFAULT_PARAMS, fit: Fit = U
  */
 export function networkFromEdges(
   n: number,
-  chemical: { pre: number; post: number; synapses: number; sign: number }[],
+  chemical: { pre: number; post: number; synapses: number; sign: number; mix?: number | undefined }[],
   gap: { a: number; b: number; synapses: number }[],
   params: NeuronParams = DEFAULT_PARAMS,
 ): Network {
-  const eOf = (sign: number) =>
-    sign > 0 ? params.eExc : sign < 0 ? params.eInh : params.eInh + params.ambiguousMix * (params.eExc - params.eInh);
+  const eOf = (sign: number, mix = params.ambiguousMix) =>
+    sign > 0 ? params.eExc : sign < 0 ? params.eInh : params.eInh + mix * (params.eExc - params.eInh);
 
   const syn = [...chemical].sort((a, b) => a.post - b.post || a.pre - b.pre);
   const synStart = new Int32Array(n + 1);
@@ -182,7 +183,7 @@ export function networkFromEdges(
   for (let i = 0; i < n; i++) synStart[i + 1]! += synStart[i]!;
   const synPre = Int32Array.from(syn, (e) => e.pre);
   const synG = Float64Array.from(syn, (e) => params.gSynPerSynapse * e.synapses);
-  const synE = Float64Array.from(syn, (e) => eOf(e.sign));
+  const synE = Float64Array.from(syn, (e) => eOf(e.sign, e.mix));
 
   const pairs: [number, number, number][] = [];
   for (const e of gap) {
