@@ -17,6 +17,7 @@ import { DEFAULT_PARAMS, buildNetwork, createNeuronState, stepNeurons, type Netw
 import { Medium, PLATE_RADIUS } from './plate';
 import { createPuppet, drivePuppet, puppetGait, type Puppet } from './puppet';
 import { Purpose, Rng } from './rng';
+import { saltAt, senseSalt, type SaltSpot } from './salt';
 import { senseTouch, TOUCH_MS, type Touch } from './touch';
 
 export interface World {
@@ -47,6 +48,10 @@ export interface World {
    * excitatory), negative a chloride pump or channel (inhibitory).
    */
   light: Float64Array;
+  /** Salt spots on the agar (DESIGN.md section 8.3). */
+  salt: SaltSpot[];
+  /** Salt concentration ASEL and ASER have adapted to, mM. */
+  saltAdapted: Float64Array;
 }
 
 /**
@@ -111,6 +116,8 @@ export function createWorld(seed: number, b: Brain = brain()): World {
     touch: null,
     ablated: [...b.ablated],
     light: new Float64Array(NEURON_COUNT),
+    salt: [],
+    saltAdapted: new Float64Array(2),
   };
 }
 
@@ -128,6 +135,9 @@ export function step(world: World, b: Brain = brain()): void {
   turningAngles(world.body.x, world.body.y, turning);
   senseProprioception(b.proprio, turning, world.neurons.sense!);
   senseTouch(world.touch, world.step, world.neurons.sense!);
+  if (world.salt.length > 0) {
+    senseSalt(saltAt(world.salt, world.body.x[0]!, world.body.y[0]!, world.step), world.saltAdapted, 1, world.neurons.sense!);
+  }
   for (let i = 0; i < NEURON_COUNT; i++) world.neurons.sense![i] = world.neurons.sense![i]! + world.light[i]!;
   for (const c of world.ablated) world.neurons.sense![c] = 0;
   if (world.touch && world.step >= world.touch.until) world.touch = null;
@@ -195,4 +205,22 @@ export function setLight(world: World, neuron: number, nS: number): void {
   if (!Number.isInteger(neuron) || neuron < 0 || neuron >= NEURON_COUNT) throw new Error(`No neuron ${neuron}`);
   if (!Number.isFinite(nS)) throw new Error(`Bad conductance ${nS}`);
   world.light[neuron] = nS;
+}
+
+/**
+ * Lab bench: spot `umol` µmol of NaCl at (x, y) µm, placed `ageMs` ms ago
+ * (the assays spot salt hours before the worms go on). The salt sensors
+ * start adapted to whatever the nose then feels, as a worm that has been
+ * on the plate a while.
+ */
+export function placeSalt(world: World, x: number, y: number, umol: number, ageMs = 0): void {
+  for (const v of [x, y, umol, ageMs]) if (!Number.isFinite(v)) throw new Error(`Bad salt spot ${x}, ${y}, ${umol}, ${ageMs}`);
+  if (umol <= 0 || ageMs < 0) throw new Error('Salt needs a positive amount and a non-negative age');
+  world.salt.push({ x, y, umol, placed: world.step - ageMs });
+  world.saltAdapted.fill(saltAt(world.salt, world.body.x[0]!, world.body.y[0]!, world.step));
+}
+
+/** Salt concentration at the nose, mM. */
+export function saltAtNose(world: World): number {
+  return saltAt(world.salt, world.body.x[0]!, world.body.y[0]!, world.step);
 }

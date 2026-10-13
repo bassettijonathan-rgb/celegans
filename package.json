@@ -15,6 +15,7 @@
     "viscosity": "tsx tools/viscosity.ts",
     "rhythm": "tsx tools/rhythm.ts",
     "touch": "tsx tools/touch.ts",
+    "chemotaxis": "tsx tools/chemotaxis.ts",
     "steer": "tsx tools/steer.ts"
   },
   "devDependencies": {
