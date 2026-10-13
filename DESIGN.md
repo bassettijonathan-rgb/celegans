@@ -774,7 +774,18 @@ the worker setup. Its body code does not (D9), and that repo is not changed.
   V1a and V1b miss narrowly, touch does not yet reach AVA. **M4b** (done, touch not solved):
   resting release (4.2), slow channels for command cells, rectifying gap junctions (4.6). Touch
   still does not reach AVA (9.2), so V2a–e and V4a remain open; the app keeps the M4a fit.
-- **M5 Salt chemotaxis.** Salt field, ASE, full fitting ensemble. V3a–c, V4b.
+- **M4c Transmission calibration** (done, did not succeed): Randi 2023 atlas data, its fit/held-out
+  split, the atlas experiment in the model and a linear-response fit (7.4). The atlas cannot
+  calibrate this model's transmission (9.3).
+- **M5 Salt chemotaxis.** Salt field, ASE, full fitting ensemble. V3a–c, V4b. **Started, then
+  paused with the project (2026-10-13):** the salt field (8.3), ASEL/ASER sensing with adaptation
+  and the salt steering check (`npm run chemotaxis`) are built; salt does not steer the worm,
+  because sensory signals fade within two hops (9.2, 9.3).
+- **Project paused (2026-10-13), by Marco's choice.** The worm crawls and swims under its own
+  rhythm, and backs up when AVA is lit. Touch reversal, salt chemotaxis and the atlas remain open;
+  all three fail for one reason: wiring plus uniform rules does not reproduce the worm's signalling.
+  Restarting would need a model change that makes transmission sparse but non-fading without
+  fitting pathways by hand (for example per-cell excitability from CeNGEN expression).
 - **M6 Lab bench polish.** Evidence-label browser, ensemble switcher, CSV export, assay presets.
 
 ## 13. Later
